@@ -1,0 +1,112 @@
+\documentclass[aspectratio=1610]{beamer}
+\usepackage{graphicx}
+\graphicspath{{C:/Users/krita/Pictures/Screenshots/}}
+\usetheme{Boadilla} % You can change the theme to your preference
+
+\title{Barcoding}
+\author{Kritarsh Negi}
+\institute{The CPAP Box}
+\date{\today}
+\begin{document}
+% Title Slide
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% Outline Slide
+\begin{frame}{Outline}
+    \tableofcontents
+\end{frame}
+
+% Section 1: Introduction
+\section{Major Actions}
+\begin{frame}{Actions Taken}
+    \begin{itemize}
+        \item Improved UI
+        \item Able to send the SKU and Barcodes to Pipedrive
+        \item Added In line viewer for excel sheets on the website that updates
+        \item Added manual and automated ways to match the UPC with the SKUs on the spreadsheets
+    \end{itemize}
+\end{frame}
+\begin{frame}{Things to work on }
+    \begin{itemize}
+        \item Pricing: fix bugs on the website
+        \item Publish the website
+        \item Test as many SKUs as possible
+        \item Uploading images to Pipedrive via their API
+    \end{itemize}
+\end{frame}
+\begin{frame}{Tools Used}
+    \begin{itemize}
+        \item Barcode Scanner
+        \item Pipedrive API
+        \item UPCDatabase API
+        \item ReactJS
+        \item ExpressJS
+    \end{itemize}
+\end{frame}
+\section{Changes of Scope}
+\begin{frame}{Changes of Scope}
+    \begin{itemize}
+        \item Adding image taking functionality 
+    \end{itemize}
+\end{frame}
+\section{Measures}
+\begin{frame}{Measures}
+    \begin{itemize}
+        \item Percent of tracking numbers found in Pipedrive 
+        \item Percent of SKUs found in each of the spreadsheets
+        \item Percent of Errors automatically corrected by fuzzy string matching
+        \item Percent of Errors manually corrected by Users
+        \item Turnaround time between item arriving and the SKU being added to the deal in Pipedrive
+    \end{itemize}
+\end{frame}
+\section{Road Blocks}
+\begin{frame}{Road Blocks}
+    \begin{itemize}
+        \item Updating flaw-no flaw dropdown with a specific checklist item for each flaw
+        \item Fixing the bug with the pricing
+    \end{itemize}
+\end{frame}
+\begin{frame}{Road Blocks}
+    \includegraphics[width = \linewidth]{manualprompt.png}
+\end{frame}
+\begin{frame}{Road Blocks}
+    \includegraphics[width = \linewidth]{finished.png}
+\end{frame}
+\begin{frame}{Road Blocks}
+    \includegraphics[width = \linewidth]{automatch.png}
+\end{frame}
+\begin{frame}{Road Blocks}
+    \includegraphics[width = \linewidth]{pipedrive.png}
+\end{frame} 
+\section{Are we on time?}
+\begin{frame}{Are we on time?}
+    \begin{itemize}
+        \item Yes
+        \begin{itemize}
+            \item A rapid prototype of the project is done and now I need to test to work out the bugs and add functionality for flaw detection
+            \item Work on Inventory management 
+            \begin{itemize}
+                \item Work at finding a solution to the discrepancy between the inventory in Magento and the subscription model inventory
+            \end{itemize}
+            \item Work on the SellMyCpap website
+            \begin{itemize}
+                \item dynamic pricing
+            \end{itemize}
+        \end{itemize}
+    \end{itemize}
+
+
+
+
+
+\end{frame}
+
+% Thank You Slide
+\begin{frame}{Thank You}
+    \centering
+    \Huge Thank You!
+\end{frame}
+
+\end{document}

@@ -1,0 +1,28 @@
+// .vscode/launch.json
+{
+  "version": "0.2.0",
+  "compounds": [
+    {
+      "name": "Debug Full Stack",
+      "configurations": ["Debug Frontend", "Debug Backend"]
+    }
+  ],
+  "configurations": [
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Debug Frontend",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/frontend/src"
+    },
+    {
+      "type": "pwa-node",
+      "request": "launch",
+      "name": "Debug Backend",
+      "program": "${workspaceFolder}/backend/server.js",
+      "cwd": "${workspaceFolder}/backend",
+      "runtimeArgs": ["--nolazy", "-r", "dotenv/config"],
+      "envFile": "${workspaceFolder}/backend/.env"
+    }
+  ]
+}

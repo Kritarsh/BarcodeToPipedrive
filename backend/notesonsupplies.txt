@@ -1,0 +1,9 @@
+Inventory Supplies:
+    Resmed: All mentions in inventory supplies are five digits, the barcode is UPC and when scanned would give you 12 numbers: we want characters 7-11 inclusive
+    Respironics heated tubing: Start with HT or SYS1
+    
+
+Check company function:
+i
+1. Check characters 7-11 for Resmed
+2. Check for the HT or SYS1 for Respironics
