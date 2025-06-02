@@ -34,7 +34,9 @@ function App() {
     ];
     files.forEach(async (file) => {
       try {
-        const res = await axios.get(`${apiUrl}/api/excel/${encodeURIComponent(file)}`);
+        const res = await axios.get(
+          `${apiUrl}/api/excel/${encodeURIComponent(file)}`
+        );
         setExcelData((prevData) => ({
           ...prevData,
           [file]: res.data.data,
@@ -226,7 +228,21 @@ function App() {
               )}
               <button
                 className="btn btn-secondary w-full mb-4"
-                onClick={() => {
+                onClick={async () => {
+                  // Send the current tracking number to backend to flush notes
+                  if (trackingNumber) {
+                    try {
+                      await axios.post(`${apiUrl}/api/barcode`, {
+                        scanType: "tracking",
+                        barcode: trackingNumber,
+                        sessionId,
+                      });
+                    } catch (err) {
+                      // Optionally handle error
+                      setMessage("Failed to finalize previous tracking batch.");
+                    }
+                  }
+                  // Now reset frontend state for new tracking
                   setDealFound(false);
                   setTrackingNumber("");
                   setSku("");
@@ -237,7 +253,7 @@ function App() {
                   setSpreadsheetMatch(null);
                   setDescriptionResult("");
                   setPrice(null);
-                  setTotalPrice(0); // Optionally reset total price for new batch
+                  setTotalPrice(0);
                 }}
               >
                 Start New Tracking Number
