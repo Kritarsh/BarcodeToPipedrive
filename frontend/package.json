@@ -13,16 +13,16 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "react-scripts": "^5.0.1",
     "axios": "^1.9.0",
     "daisyui": "^5.0.37",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-scripts": "^5.0.1",
     "string-similarity": "^4.0.4",
-    "xlsx": "^0.18.5",
-    "tailwindcss": "^4.1.7"
+    "tailwindcss": "^4.1.7",
+    "xlsx": "^0.18.5"
   },
   "browserslist": {
     "production": [
@@ -37,6 +37,7 @@
     ]
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.8",
     "jest": "^27.5.1"
   }
 }
