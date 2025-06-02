@@ -30,7 +30,7 @@ const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
 // In-memory session store (for demo)
 const redisClient = createClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
+  url: process.env.REDIS_URL 
 });
 redisClient.connect();
 // --- Helper Functions ---
