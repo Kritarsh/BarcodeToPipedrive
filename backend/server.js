@@ -30,9 +30,18 @@ const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
 // In-memory session store (for demo)
 const redisClient = createClient({
-  url: process.env.REDIS_URL 
+  username: "default",
+  password: "3mkjobNOBXgrGxovQZrjMlWj8dVSl6pW",
+  socket: {
+    host: "redis-11587.c57.us-east-1-4.ec2.redns.redis-cloud.com",
+    port: 11587,
+  },
 });
-redisClient.connect();
+
+redisClient.on("error", (err) => console.log("Redis Client Error", err));
+
+await redisClient.connect();
+
 // --- Helper Functions ---
 async function getSession(sessionId) {
   const data = await redisClient.get(sessionId);
