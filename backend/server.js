@@ -13,7 +13,7 @@ import {
   matchDescriptionWithDatabase,
   returnProductDescription,
   getPriceForName,
-} from "./skuMatcher.js";
+} from "./skumatcher.js";
 
 dotenv.config();
 
