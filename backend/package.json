@@ -11,6 +11,7 @@
   "author": "Kritarsh Negi",
   "license": "MIT",
   "dependencies": {
-    "express": "^5.1.0"
+    "express": "^5.1.0", 
+    "axios": "^1.0.0"
   }
 }
