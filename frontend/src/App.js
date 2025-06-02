@@ -34,7 +34,7 @@ function App() {
     ];
     files.forEach(async (file) => {
       try {
-        const res = await axios.get(`/api/excel/${encodeURIComponent(file)}`);
+        const res = await axios.get(`${apiUrl}/api/excel/${encodeURIComponent(file)}`);
         setExcelData((prevData) => ({
           ...prevData,
           [file]: res.data.data,
