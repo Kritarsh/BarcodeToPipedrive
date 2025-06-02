@@ -15,7 +15,14 @@
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-scripts": "^5.0.1"
+    "react-scripts": "^5.0.1",
+    "axios": "^1.9.0",
+    "daisyui": "^5.0.37",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "string-similarity": "^4.0.4",
+    "xlsx": "^0.18.5",
+    "tailwindcss": "^4.1.7"
   },
   "browserslist": {
     "production": [
