@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 
+const apiUrl = process.env.REACT_APP_API_URL;
+
 function App() {
   const [sessionId] = useState(() => Math.random().toString(36).substr(2, 9));
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -47,7 +49,7 @@ function App() {
     e.preventDefault();
     setMessage("Searching for deal...");
     try {
-      const res = await axios.post("/api/barcode", {
+      const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "tracking",
         barcode: trackingNumber,
         sessionId,
@@ -67,7 +69,7 @@ function App() {
     setPrice(null);
 
     try {
-      const res = await axios.post("/api/barcode", {
+      const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "sku",
         barcode: sku,
         sessionId,
@@ -120,7 +122,7 @@ function App() {
         "";
     }
     try {
-      const retryRes = await axios.post("/api/barcode/manual", {
+      const retryRes = await axios.post(`${apiUrl}/api/barcode/manual`, {
         barcode: pendingSku,
         manualRef,
         sessionId,
