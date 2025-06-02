@@ -49,6 +49,21 @@ async function findDealIdByTrackingNumber(trackingNumber) {
   return deals.length > 0 ? deals[0].item.id : null;
 }
 
+function qcFlawLabel(value) {
+  switch (value) {
+    case "flaw":
+      return "Missing Part";
+    case "damaged":
+      return "Damaged";
+    case "other":
+      return "Not in Original Packaging";
+    case "none":
+      return "No Flaw";
+    default:
+      return value;
+  }
+}
+
 // --- Routes ---
 
 // Excel file fetch
@@ -138,7 +153,9 @@ app.post("/api/barcode", async (req, res) => {
       }. Price: $${calculatedPrice}. Description: ${
         result.row.Description || result.row.Name || result.row.Style || ""
       }${result.row.Size ? " Size: " + result.row.Size : ""}${
-        req.body.qcFlaw === "flaw" ? " [QC Flaw]" : ""
+        req.body.qcFlaw && req.body.qcFlaw !== "none"
+          ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
+          : ""
       }`;
       // Do NOT call addNoteToPipedrive here anymore
       if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
@@ -187,7 +204,9 @@ app.post("/api/barcode/manual", async (req, res) => {
     }. Price: $${calculatedPrice}. Description: ${
       result.row.Description || result.row.Name || result.row.Style || ""
     }${result.row.Size ? " Size: " + result.row.Size : ""}${
-      req.body.qcFlaw === "flaw" ? " [QC Flaw]" : ""
+      req.body.qcFlaw && req.body.qcFlaw !== "none"
+        ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
+        : ""
     }`;
 
     let descriptionResult;
