@@ -54,6 +54,7 @@ async function findDealIdByTrackingNumber(trackingNumber) {
 // Excel file fetch
 app.get("/api/excel/:filename", (req, res) => {
   const { filename } = req.params;
+  console.log("Fetching file:", filename);
   const allowedFiles = [
     "Inventory Supplies 2024.xlsx",
     "MagentoInventory.xlsx",
