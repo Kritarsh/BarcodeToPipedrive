@@ -85,7 +85,17 @@ app.post("/api/barcode", async (req, res) => {
 
   try {
     if (scanType === "tracking") {
-      // Find deal by tracking number
+      // Before resetting, add all notes to Pipedrive for the previous session
+      if (
+        session[sessionId] &&
+        session[sessionId].noteContent &&
+        session[sessionId].dealId
+      ) {
+        for (const note of session[sessionId].noteContent) {
+          await addNoteToPipedrive(note, session[sessionId].dealId);
+        }
+      }
+      // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
       const dealId = await findDealIdByTrackingNumber(trackingNumber);
       if (!dealId) {
@@ -93,7 +103,7 @@ app.post("/api/barcode", async (req, res) => {
           .status(404)
           .json({ error: "Deal not found for tracking number" });
       }
-      session[sessionId] = { dealId };
+      session[sessionId] = { dealId, noteContent: [] };
       return res.json({ message: "Deal found", dealId });
     }
 
@@ -131,11 +141,13 @@ app.post("/api/barcode", async (req, res) => {
       }${result.row.Size ? " Size: " + result.row.Size : ""}${
         req.body.qcFlaw === "flaw" ? " [QC Flaw]" : ""
       }`;
-      await addNoteToPipedrive(noteContent, dealId);
+      // Do NOT call addNoteToPipedrive here anymore
+      if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
+      session[sessionId].noteContent.push(noteContent);
 
       return res.json({
         note: result,
-        noteContent,
+        noteContent: session[sessionId].noteContent,
         spreadsheetMatch: result.file,
         price: calculatedPrice,
       });
@@ -178,7 +190,6 @@ app.post("/api/barcode/manual", async (req, res) => {
     }${result.row.Size ? " Size: " + result.row.Size : ""}${
       req.body.qcFlaw === "flaw" ? " [QC Flaw]" : ""
     }`;
-    await addNoteToPipedrive(noteContent, session[sessionId].dealId);
 
     let descriptionResult;
     try {

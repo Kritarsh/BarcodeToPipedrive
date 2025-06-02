@@ -198,7 +198,9 @@ function App() {
                     className="select select-bordered w-full mt-1"
                   >
                     <option value="none">No Flaw</option>
-                    <option value="flaw">Quality Control Flaw</option>
+                    <option value="flaw">Missing Part </option>
+                    <option value="damaged">Damaged</option>
+                    <option value="other">Not in Original Packaging</option>
                   </select>
                 </label>
                 <button type="submit" className="btn btn-success w-full">

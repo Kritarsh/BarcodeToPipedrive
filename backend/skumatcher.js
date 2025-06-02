@@ -38,11 +38,11 @@ export function getPriceForName(name, flaw) {
   for (const rule of priceRules) {
     if (name.toLowerCase().includes(rule.keyword.toLowerCase())) {
       price += rule.price;
-      if(flaw && ( !rule.keyword.toLowerCase().includes("mask") || rule.keyword.toLowerCase().includes("Cushion") || rule.keyword.toLowerCase().includes("Water Chamber") || rule.keyword.toLowerCase().includes("Heated Tubing") || rule.keyword.toLowerCase().includes("Standard Tubing") || rule.keyword.toLowerCase().includes("Filters") )) {
+      if(flaw != 'none' && ( !rule.keyword.toLowerCase().includes("mask") || rule.keyword.toLowerCase().includes("Cushion") || rule.keyword.toLowerCase().includes("Water Chamber") || rule.keyword.toLowerCase().includes("Heated Tubing") || rule.keyword.toLowerCase().includes("Standard Tubing") || rule.keyword.toLowerCase().includes("Filters") )) {
         price = 0; 
       }
-      else if(flaw){
-        price += rule.price * 0.5; 
+      else if(flaw != 'none'){
+        price = rule.price * 0.5; 
       }
     }
   }
