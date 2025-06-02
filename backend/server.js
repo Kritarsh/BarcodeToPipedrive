@@ -91,9 +91,8 @@ app.post("/api/barcode", async (req, res) => {
         session[sessionId].noteContent &&
         session[sessionId].dealId
       ) {
-        for (const note of session[sessionId].noteContent) {
-          await addNoteToPipedrive(note, session[sessionId].dealId);
-        }
+        const allNotes = session[sessionId].noteContent.join("\n");
+        await addNoteToPipedrive(allNotes, session[sessionId].dealId);
       }
       // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
