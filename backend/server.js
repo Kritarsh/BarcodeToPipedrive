@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
+import { createClient } from "redis";
 
 import { addNoteToPipedrive } from "./pipedrive.js";
 import {
@@ -28,10 +29,20 @@ const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
 // In-memory session store (for demo)
-const session = {};
-
+import { createClient } from "redis";
+const redisClient = createClient({
+  url: process.env.REDIS_URL || "redis://localhost:6379",
+});
+redisClient.connect();
 // --- Helper Functions ---
+async function getSession(sessionId) {
+  const data = await redisClient.get(sessionId);
+  return data ? JSON.parse(data) : {};
+}
 
+async function setSession(sessionId, data) {
+  await redisClient.set(sessionId, JSON.stringify(data));
+}
 async function extractTrackingNumberfromBarcode(barcode) {
   let trackingNumber = barcode.includes("}")
     ? barcode.split("}")[1]?.trim()
@@ -100,21 +111,21 @@ app.post("/api/barcode", async (req, res) => {
 
   try {
     if (scanType === "tracking") {
-      // Before resetting, add all notes to Pipedrive for the previous session
+      const oldSession = await getSession(sessionId);
       if (
-        session[sessionId] &&
-        session[sessionId].noteContent &&
-        session[sessionId].noteContent.length > 0 &&
-        session[sessionId].dealId
+        oldSession &&
+        oldSession.noteContent &&
+        oldSession.noteContent.length > 0 &&
+        oldSession.dealId
       ) {
-        const allNotes = session[sessionId].noteContent.join("\n");
-        const total = session[sessionId].prices
-          ? session[sessionId].prices.reduce((acc, price) => acc + price, 0)
+        const allNotes = oldSession.noteContent.join("\n");
+        const total = oldSession.prices
+          ? oldSession.prices.reduce((acc, price) => acc + price, 0)
           : 0;
         const allNotesWithTotal = `${allNotes}\nTotal Price: $${total.toFixed(
           2
         )}`;
-        await addNoteToPipedrive(allNotesWithTotal, session[sessionId].dealId);
+        await addNoteToPipedrive(allNotesWithTotal, oldSession.dealId);
       }
       // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
@@ -124,18 +135,19 @@ app.post("/api/barcode", async (req, res) => {
           .status(404)
           .json({ error: "Deal not found for tracking number" });
       }
-      session[sessionId] = { dealId, noteContent: [], prices: [] };
+      await setSession(sessionId, { dealId, noteContent: [], prices: [] });
       return res.json({ message: "Deal found", dealId });
     }
 
     if (scanType === "sku") {
-      // Add SKU note and check spreadsheet
-      const dealId = session[sessionId]?.dealId;
+      const currentSession = await getSession(sessionId);
+      const dealId = currentSession?.dealId;
       if (!dealId) {
         return res.status(400).json({
           error: "No deal found for this session. Scan tracking number first.",
         });
       }
+      // Add SKU note and check spreadsheet
       const result = await matchSkuWithDatabase(barcode);
       if (!result.match) {
         return res.json({
@@ -164,17 +176,17 @@ app.post("/api/barcode", async (req, res) => {
           ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
           : ""
       }`;
-      // Do NOT call addNoteToPipedrive here anymore
-      if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
-      session[sessionId].noteContent.push(noteContent);
+      if (!currentSession.noteContent) currentSession.noteContent = [];
+      currentSession.noteContent.push(noteContent);
 
-      // After pushing noteContent
-      if (!session[sessionId].prices) session[sessionId].prices = [];
-      session[sessionId].prices.push(calculatedPrice);
+      if (!currentSession.prices) currentSession.prices = [];
+      currentSession.prices.push(calculatedPrice);
+
+      await setSession(sessionId, currentSession);
 
       return res.json({
         note: result,
-        noteContent: session[sessionId].noteContent,
+        noteContent: currentSession.noteContent,
         spreadsheetMatch: result.file,
         price: calculatedPrice,
       });
