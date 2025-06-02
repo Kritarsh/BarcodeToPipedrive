@@ -29,7 +29,6 @@ const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
 // In-memory session store (for demo)
-import { createClient } from "redis";
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
 });
