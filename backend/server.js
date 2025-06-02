@@ -104,10 +104,17 @@ app.post("/api/barcode", async (req, res) => {
       if (
         session[sessionId] &&
         session[sessionId].noteContent &&
+        session[sessionId].noteContent.length > 0 &&
         session[sessionId].dealId
       ) {
         const allNotes = session[sessionId].noteContent.join("\n");
-        await addNoteToPipedrive(allNotes, session[sessionId].dealId);
+        const total = session[sessionId].prices
+          ? session[sessionId].prices.reduce((acc, price) => acc + price, 0)
+          : 0;
+        const allNotesWithTotal = `${allNotes}\nTotal Price: $${total.toFixed(
+          2
+        )}`;
+        await addNoteToPipedrive(allNotesWithTotal, session[sessionId].dealId);
       }
       // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
@@ -117,7 +124,7 @@ app.post("/api/barcode", async (req, res) => {
           .status(404)
           .json({ error: "Deal not found for tracking number" });
       }
-      session[sessionId] = { dealId, noteContent: [] };
+      session[sessionId] = { dealId, noteContent: [], prices: [] };
       return res.json({ message: "Deal found", dealId });
     }
 
@@ -160,6 +167,10 @@ app.post("/api/barcode", async (req, res) => {
       // Do NOT call addNoteToPipedrive here anymore
       if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
       session[sessionId].noteContent.push(noteContent);
+
+      // After pushing noteContent
+      if (!session[sessionId].prices) session[sessionId].prices = [];
+      session[sessionId].prices.push(calculatedPrice);
 
       return res.json({
         note: result,
@@ -208,6 +219,13 @@ app.post("/api/barcode/manual", async (req, res) => {
         ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
         : ""
     }`;
+    if (!session[sessionId]) session[sessionId] = { noteContent: [] };
+    if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
+    session[sessionId].noteContent.push(noteContent);
+
+    // After pushing noteContent
+    if (!session[sessionId].prices) session[sessionId].prices = [];
+    session[sessionId].prices.push(calculatedPrice);
 
     let descriptionResult;
     try {
