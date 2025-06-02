@@ -4,6 +4,7 @@ import xlsx from "xlsx";
 import dotenv from "dotenv";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import cors from "cors";
 
 import { addNoteToPipedrive } from "./pipedrive.js";
 import {
@@ -19,6 +20,7 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 console.log("Server started");
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
