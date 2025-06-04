@@ -24,7 +24,8 @@
     "react-scripts": "^5.0.1",
     "string-similarity": "^4.0.4",
     "tailwindcss": "^3.4.17",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5", 
+    "multer": "^1.4.2"
   },
   "browserslist": {
     "production": [

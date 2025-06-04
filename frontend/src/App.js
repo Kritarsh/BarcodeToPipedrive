@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-
+import multer from "multer";
 const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
@@ -172,6 +172,48 @@ function App() {
                 className="input input-bordered w-full mt-1 disabled:bg-base-200"
               />
             </label>
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-2">
+                Attach Image to Deal
+              </h2>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!dealFound || !trackingNumber) {
+                    setMessage("Scan a tracking number first.");
+                    return;
+                  }
+                  const fileInput = e.target.elements.imageFile;
+                  if (!fileInput.files[0]) {
+                    setMessage("Please select an image file.");
+                    return;
+                  }
+                  const formData = new FormData();
+                  formData.append("image", fileInput.files[0]);
+                  formData.append("sessionId", sessionId);
+                  formData.append("trackingNumber", trackingNumber);
+
+                  try {
+                    await axios.post(`${apiUrl}/api/upload-image`, formData, {
+                      headers: { "Content-Type": "multipart/form-data" },
+                    });
+                    setMessage("Image uploaded and attached to deal!");
+                  } catch (err) {
+                    setMessage("Failed to upload image.");
+                  }
+                }}
+              >
+                <input
+                  type="file"
+                  name="imageFile"
+                  accept="image/*"
+                  className="mb-2"
+                />
+                <button type="submit" className="btn btn-info w-full">
+                  Upload Image
+                </button>
+              </form>
+            </div>
             <button
               type="submit"
               disabled={dealFound}
