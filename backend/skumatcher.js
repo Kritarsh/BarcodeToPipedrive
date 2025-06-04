@@ -167,6 +167,7 @@ export async function matchSkuWithDatabaseManual(barcode, manualRef) {
     manualRef,
   };
 }
+
 export async function returnProductDescription({
   file,
   matchedColumn,

@@ -90,6 +90,7 @@ function App() {
         setShowManualRef(true);
         setPendingSku(sku); // Store the SKU for manual reference
       }
+      setSku("");
 
       // --- USE PRICE FROM BACKEND ONLY ---
       console.log("Price from backend:", res.data.price);
