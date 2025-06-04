@@ -51,6 +51,11 @@ function App() {
       trackingInputRef.current.focus();
     }
   }, [dealFound]);
+  useEffect(() => {
+    if(dealFound && skuInputRef.current) {
+      skuInputRef.current.focus();
+    }
+  }, [dealFound, sku]);
   const handleTrackingSubmit = async (e) => {
     e.preventDefault();
     setMessage("Searching for Tracking Number...");
@@ -66,6 +71,7 @@ function App() {
       setMessage(err.response?.data?.error || "Deal not found.");
     }
   };
+
 
   const handleSkuSubmit = async (e) => {
     e.preventDefault();
@@ -95,6 +101,8 @@ function App() {
         setPendingSku(sku); // Store the SKU for manual reference
       }
       setSku("");
+
+
 
       // --- USE PRICE FROM BACKEND ONLY ---
       console.log("Price from backend:", res.data.price);
