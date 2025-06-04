@@ -52,8 +52,12 @@ function App() {
     }
   }, [dealFound]);
   useEffect(() => {
-    if(dealFound && skuInputRef.current) {
-      skuInputRef.current.focus();
+    if(dealFound) {
+      setTimeout(() => {
+        if(skuInputRef.current) {
+          skuInputRef.current.focus();
+        }
+      }, 0);
     }
   }, [dealFound, sku]);
   const handleTrackingSubmit = async (e) => {
