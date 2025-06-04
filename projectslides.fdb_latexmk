@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1749047706.31875 "c:/Users/krita/Asset/projectslides.tex" "projectslides.pdf" "projectslides" 1749047708.92838 0
+["pdflatex"] 1749048347.9437 "c:/Users/krita/Asset/projectslides.tex" "projectslides.pdf" "projectslides" 1749048350.54882 0
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1747443542 1004 54797486969f23fa377b128694d548df ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex8.tfm" 1747443542 988 bdf658c3bfc2d96d3c8b02cfc1c94c20 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm" 1747443542 916 f87d7c45f9c908e672703b83b72241a3 ""
@@ -191,16 +191,16 @@
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1748056213 94247 228f49d6bdf727739c5af6b97bd14a78 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-var/web2c/pdftex/pdflatex.fmt" 1748056228 2166711 033c9cc88cc3c06729747ea52a0fe665 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf.cnf" 1747443559 956 3a220487175abd462f2198e027963bed ""
-  "c:/Users/krita/Asset/projectslides.tex" 1749047705 3378 dd406332738344b9d79688eaeb252944 ""
+  "c:/Users/krita/Asset/projectslides.tex" 1749048347 3371 939613095a9ad8f4817c1c94734b175f ""
   "c:/Users/krita/Pictures/Screenshots/automatch.png" 1748518210 121097 cfd49244d58a951471eb92af3afeb88e ""
   "c:/Users/krita/Pictures/Screenshots/finished.png" 1748518041 135610 be0596423fffbec10083cd1134e735e1 ""
   "c:/Users/krita/Pictures/Screenshots/manualprompt.png" 1748517950 133201 6b7427ab6bc16b942b619f55d913c7ac ""
   "c:/Users/krita/Pictures/Screenshots/pipedrive.png" 1748528317 29980 3e5e119e35675664634ed25b3c001ab6 ""
-  "projectslides.aux" 1749047708 3628 15d427c443191ad18925b03cc8b66c36 "pdflatex"
-  "projectslides.nav" 1749047708 2267 7a4360b2d5ac2610cab64681f22ddc03 "pdflatex"
-  "projectslides.out" 1749047708 551 4a323333cf1b5c0f67645226ab325b88 "pdflatex"
-  "projectslides.tex" 1749047705 3378 dd406332738344b9d79688eaeb252944 ""
-  "projectslides.toc" 1749047708 244 b8038ae665cda457a1f548af80c6e247 "pdflatex"
+  "projectslides.aux" 1749048350 3628 15d427c443191ad18925b03cc8b66c36 "pdflatex"
+  "projectslides.nav" 1749048350 2267 7a4360b2d5ac2610cab64681f22ddc03 "pdflatex"
+  "projectslides.out" 1749048350 551 4a323333cf1b5c0f67645226ab325b88 "pdflatex"
+  "projectslides.tex" 1749048347 3371 939613095a9ad8f4817c1c94734b175f ""
+  "projectslides.toc" 1749048350 244 b8038ae665cda457a1f548af80c6e247 "pdflatex"
   (generated)
   "projectslides.aux"
   "projectslides.log"

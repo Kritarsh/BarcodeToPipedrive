@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import multer from "multer";
 const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
