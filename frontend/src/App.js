@@ -26,6 +26,12 @@ function App() {
   const [totalPrice, setTotalPrice] = useState(0);
   const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
+  const setSkuInputAndFocus = (el) => {
+    skuInputRef.current = el;
+    if (el) {
+      el.focus();
+    }
+  };
   useEffect(() => {
     const files = [
       "Inventory Supplies 2024.xlsx",
@@ -189,7 +195,16 @@ function App() {
                 className="input input-bordered w-full mt-1 disabled:bg-base-200"
               />
             </label>
-            <div className="mb-6">
+           
+            <button
+              type="submit"
+              disabled={dealFound}
+              className="btn btn-primary w-full"
+            >
+              Scan Tracking
+            </button>
+          </form>
+           <div className="mb-6">
               <h2 className="text-lg font-semibold text-white mb-2">
                 Attach Image to Deal
               </h2>
@@ -231,14 +246,6 @@ function App() {
                 </button>
               </form>
             </div>
-            <button
-              type="submit"
-              disabled={dealFound}
-              className="btn btn-primary w-full"
-            >
-              Scan Tracking
-            </button>
-          </form>
           {dealFound && (
             <>
               <form onSubmit={handleSkuSubmit} className="mb-6">
@@ -249,6 +256,7 @@ function App() {
                     value={sku}
                     onChange={(e) => setSku(e.target.value)}
                     required
+                    ref={setSkuInputAndFocus}
                     className="input input-bordered w-full mt-1"
                   />
                 </label>
