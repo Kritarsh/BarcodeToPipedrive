@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, use} from "react";
 import axios from "axios";
 const apiUrl = process.env.REACT_APP_API_URL;
 
@@ -24,7 +24,8 @@ function App() {
   const [qcFlaw, setQcFlaw] = useState("none");
   const [price, setPrice] = useState(null);
   const [totalPrice, setTotalPrice] = useState(0);
-
+  const skuInputRef = useRef(null);
+  const trackingInputRef = useRef(null);
   useEffect(() => {
     const files = [
       "Inventory Supplies 2024.xlsx",
@@ -45,10 +46,14 @@ function App() {
       }
     });
   }, []);
-
+  useEffect(() => {
+    if(!dealFound && trackingInputRef.current) {
+      trackingInputRef.current.focus();
+    }
+  }, [dealFound]);
   const handleTrackingSubmit = async (e) => {
     e.preventDefault();
-    setMessage("Searching for deal...");
+    setMessage("Searching for Tracking Number...");
     try {
       const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "tracking",
@@ -56,7 +61,7 @@ function App() {
         sessionId,
       });
       setDealFound(true);
-      setMessage("Deal found! Now scan SKU.");
+      setMessage("Tracking Number found! Now scan SKU.");
     } catch (err) {
       setMessage(err.response?.data?.error || "Deal not found.");
     }
@@ -168,6 +173,7 @@ function App() {
                 onChange={(e) => setTrackingNumber(e.target.value)}
                 required
                 disabled={dealFound}
+                ref={trackingInputRef}
                 className="input input-bordered w-full mt-1 disabled:bg-base-200"
               />
             </label>

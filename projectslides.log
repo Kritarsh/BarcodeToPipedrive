@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.5.23)  4 JUN 2025 10:45
+This is pdfTeX, Version 3.141592653-2.6-1.40.28 (TeX Live 2025) (preloaded format=pdflatex 2025.5.23)  4 JUN 2025 10:58
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -658,11 +658,11 @@ Dictionary: translator-theorem-dictionary, Language: English
 [2
 
 ]
-LaTeX Font Info:    Trying to load font information for U+msa on input line 30.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 35.
  (c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 30.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 35.
  (c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
@@ -690,41 +690,41 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 [8
 
 ]
-<C:/Users/krita/Pictures/Screenshots/manualprompt.png, id=273, 1229.7945pt x 617.30624pt>
+<C:/Users/krita/Pictures/Screenshots/manualprompt.png, id=274, 1229.7945pt x 617.30624pt>
 File: C:/Users/krita/Pictures/Screenshots/manualprompt.png Graphic file (type png)
 <use C:/Users/krita/Pictures/Screenshots/manualprompt.png>
-Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/manualprompt.png  used on input line 73.
+Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/manualprompt.png  used on input line 78.
 (pdftex.def)             Requested size: 433.34402pt x 217.52042pt.
 
 
 [9
 
  <c:/Users/krita/Pictures/Screenshots/manualprompt.png>]
-<C:/Users/krita/Pictures/Screenshots/finished.png, id=303, 1532.72626pt x 724.20563pt>
+<C:/Users/krita/Pictures/Screenshots/finished.png, id=304, 1532.72626pt x 724.20563pt>
 File: C:/Users/krita/Pictures/Screenshots/finished.png Graphic file (type png)
 <use C:/Users/krita/Pictures/Screenshots/finished.png>
-Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/finished.png  used on input line 76.
+Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/finished.png  used on input line 81.
 (pdftex.def)             Requested size: 433.34402pt x 204.74318pt.
 
 
 [10
 
  <c:/Users/krita/Pictures/Screenshots/finished.png>]
-<C:/Users/krita/Pictures/Screenshots/automatch.png, id=332, 1226.181pt x 584.78474pt>
+<C:/Users/krita/Pictures/Screenshots/automatch.png, id=333, 1226.181pt x 584.78474pt>
 File: C:/Users/krita/Pictures/Screenshots/automatch.png Graphic file (type png)
 <use C:/Users/krita/Pictures/Screenshots/automatch.png>
-Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/automatch.png  used on input line 79.
+Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/automatch.png  used on input line 84.
 (pdftex.def)             Requested size: 433.34402pt x 206.66757pt.
 
 
 [11
 
  <c:/Users/krita/Pictures/Screenshots/automatch.png>]
-<C:/Users/krita/Pictures/Screenshots/pipedrive.png, id=360, 1107.38719pt x 110.66344pt>
+<C:/Users/krita/Pictures/Screenshots/pipedrive.png, id=361, 852.786pt x 345.08925pt>
 File: C:/Users/krita/Pictures/Screenshots/pipedrive.png Graphic file (type png)
 <use C:/Users/krita/Pictures/Screenshots/pipedrive.png>
-Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/pipedrive.png  used on input line 82.
-(pdftex.def)             Requested size: 433.34402pt x 43.30377pt.
+Package pdftex.def Info: C:/Users/krita/Pictures/Screenshots/pipedrive.png  used on input line 87.
+(pdftex.def)             Requested size: 433.34402pt x 175.35605pt.
 
 
 [12
@@ -764,7 +764,7 @@ Here is how much of TeX's memory you used:
  14 hyphenation exceptions out of 8191
  101i,15n,107p,430b,615s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmss10.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmss12.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmss17.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmss8.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmss9.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb><c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/type1/public/amsfonts/symbols/msam7.pfb>
-Output written on projectslides.pdf (14 pages, 371171 bytes).
+Output written on projectslides.pdf (14 pages, 463173 bytes).
 PDF statistics:
  485 PDF objects out of 1000 (max. 8388607)
  419 compressed objects within 5 object streams
