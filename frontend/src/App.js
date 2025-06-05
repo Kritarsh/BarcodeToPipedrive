@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, use} from "react";
+import React, { useState, useEffect, useRef, use } from "react";
 import axios from "axios";
 const apiUrl = process.env.REACT_APP_API_URL;
 
@@ -24,14 +24,32 @@ function App() {
   const [qcFlaw, setQcFlaw] = useState("none");
   const [price, setPrice] = useState(null);
   const [totalPrice, setTotalPrice] = useState(0);
+  const [requireSerial, setRequireSerial] = useState(false);
+  const [serialNumber, setSerialNumber] = useState("");
   const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
+  const serialKeywords = [
+    "AirSense 10",
+    "AirSense 11",
+    "AirCurve VAuto",
+    "AirCurve ASV",
+    "AirCurve ST",
+    "Trilogy Evo",
+    "AirMini AutoSet",
+    "Astral",
+    "Series 9 AutoSet",
+    "Series 9 CPAP",
+    "Series 9 BiPAP",
+    "Series 9 Elite",
+  ];
+
   const setSkuInputAndFocus = (el) => {
     skuInputRef.current = el;
     if (el) {
       el.focus();
     }
   };
+  const manualRefInputRef = useRef(null);
   useEffect(() => {
     const files = [
       "Inventory Supplies 2024.xlsx",
@@ -53,14 +71,14 @@ function App() {
     });
   }, []);
   useEffect(() => {
-    if(!dealFound && trackingInputRef.current) {
+    if (!dealFound && trackingInputRef.current) {
       trackingInputRef.current.focus();
     }
   }, [dealFound]);
   useEffect(() => {
-    if(dealFound) {
+    if (dealFound) {
       setTimeout(() => {
-        if(skuInputRef.current) {
+        if (skuInputRef.current) {
           skuInputRef.current.focus();
         }
       }, 0);
@@ -82,7 +100,6 @@ function App() {
     }
   };
 
-
   const handleSkuSubmit = async (e) => {
     e.preventDefault();
     setMessage("Checking SKU...");
@@ -97,6 +114,15 @@ function App() {
         sessionId,
         qcFlaw, // send QC flaw to backend if needed
       });
+      // Try to get the name/description from the backend response
+      const nameForSerialCheck =
+        (res.data.row &&
+          (res.data.row.Name ||
+            res.data.row.Description ||
+            res.data.row.Style)) ||
+        (res.data.descriptionResult &&
+          res.data.descriptionResult.description) ||
+        "";
 
       setSpreadsheetMatch(res.data.spreadsheetMatch);
       setMessage(
@@ -105,14 +131,32 @@ function App() {
           : "SKU not found, note added."
       );
 
+      // Check if serial is required
+      if (
+        serialKeywords.some((keyword) =>
+          (nameForSerialCheck || "")
+            .toLowerCase()
+            .includes(keyword.toLowerCase())
+        )
+      ) {
+        setRequireSerial(true);
+        // Optionally store the current SKU for later submission with serial
+        setPendingSku(sku);
+        setSku(""); // clear the input
+        return; // Don't proceed until serial is entered
+      }
+
       // Show manual reference form if not found
       if (!res.data.spreadsheetMatch) {
         setShowManualRef(true);
         setPendingSku(sku); // Store the SKU for manual reference
       }
       setSku("");
-
-
+      useEffect(() => {
+        if (showManualRef && manualRefInputRef.current) {
+          manualRefInputRef.current.focus();
+        }
+      }, [showManualRef]);
 
       // --- USE PRICE FROM BACKEND ONLY ---
       console.log("Price from backend:", res.data.price);
@@ -159,7 +203,7 @@ function App() {
           ? "SKU found and note added!"
           : retryRes.data.descriptionMatch
           ? "SKU not found by manual reference, but found by description!"
-          : "SKU not found, note added."
+          : "SKU not found even with the manual reference."
       );
       setShowManualRef(false);
       setManualRef("");
@@ -195,7 +239,7 @@ function App() {
                 className="input input-bordered w-full mt-1 disabled:bg-base-200"
               />
             </label>
-           
+
             <button
               type="submit"
               disabled={dealFound}
@@ -204,48 +248,48 @@ function App() {
               Scan Tracking
             </button>
           </form>
-           <div className="mb-6">
-              <h2 className="text-lg font-semibold text-white mb-2">
-                Attach Image to Deal
-              </h2>
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!dealFound || !trackingNumber) {
-                    setMessage("Scan a tracking number first.");
-                    return;
-                  }
-                  const fileInput = e.target.elements.imageFile;
-                  if (!fileInput.files[0]) {
-                    setMessage("Please select an image file.");
-                    return;
-                  }
-                  const formData = new FormData();
-                  formData.append("image", fileInput.files[0]);
-                  formData.append("sessionId", sessionId);
-                  formData.append("trackingNumber", trackingNumber);
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-white mb-2">
+              Attach Image to Deal
+            </h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!dealFound || !trackingNumber) {
+                  setMessage("Scan a tracking number first.");
+                  return;
+                }
+                const fileInput = e.target.elements.imageFile;
+                if (!fileInput.files[0]) {
+                  setMessage("Please select an image file.");
+                  return;
+                }
+                const formData = new FormData();
+                formData.append("image", fileInput.files[0]);
+                formData.append("sessionId", sessionId);
+                formData.append("trackingNumber", trackingNumber);
 
-                  try {
-                    await axios.post(`${apiUrl}/api/upload-image`, formData, {
-                      headers: { "Content-Type": "multipart/form-data" },
-                    });
-                    setMessage("Image uploaded and attached to deal!");
-                  } catch (err) {
-                    setMessage("Failed to upload image.");
-                  }
-                }}
-              >
-                <input
-                  type="file"
-                  name="imageFile"
-                  accept="image/*"
-                  className="mb-2"
-                />
-                <button type="submit" className="btn btn-info w-full">
-                  Upload Image
-                </button>
-              </form>
-            </div>
+                try {
+                  await axios.post(`${apiUrl}/api/upload-image`, formData, {
+                    headers: { "Content-Type": "multipart/form-data" },
+                  });
+                  setMessage("Image uploaded and attached to deal!");
+                } catch (err) {
+                  setMessage("Failed to upload image.");
+                }
+              }}
+            >
+              <input
+                type="file"
+                name="imageFile"
+                accept="image/*"
+                className="mb-2"
+              />
+              <button type="submit" className="btn btn-info w-full">
+                Upload Image
+              </button>
+            </form>
+          </div>
           {dealFound && (
             <>
               <form onSubmit={handleSkuSubmit} className="mb-6">
@@ -258,6 +302,7 @@ function App() {
                     required
                     ref={setSkuInputAndFocus}
                     className="input input-bordered w-full mt-1"
+                    disabled={showManualRef} // <-- Disable when manual ref is active
                   />
                 </label>
                 <label className="block mb-2 font-medium text-white">
@@ -266,6 +311,7 @@ function App() {
                     value={qcFlaw}
                     onChange={(e) => setQcFlaw(e.target.value)}
                     className="select select-bordered w-full mt-1"
+                    disabled={showManualRef} // <-- Disable when manual ref is active
                   >
                     <option value="none">No Flaw</option>
                     <option value="flaw">Missing Part </option>
@@ -273,7 +319,11 @@ function App() {
                     <option value="other">Not in Original Packaging</option>
                   </select>
                 </label>
-                <button type="submit" className="btn btn-success w-full">
+                <button
+                  type="submit"
+                  className="btn btn-success w-full"
+                  disabled={showManualRef}
+                >
                   Scan UPC
                 </button>
               </form>
@@ -287,6 +337,7 @@ function App() {
                       onChange={(e) => setManualRef(e.target.value)}
                       required
                       className="input input-bordered w-full mt-1"
+                      ref={manualRefInputRef}
                     />
                   </label>
                   <button type="submit" className="btn btn-warning w-full">

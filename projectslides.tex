@@ -23,13 +23,12 @@
 \begin{frame}{Actions Taken}
     \begin{itemize}
         \item Deployed the website to Render: \url{https://frontend-e2jk.onrender.com/}
-        \begin{itemize}
-            \item Tracking Number: 9202290182632207021471
-            \item UPC1: 9420012425898
-            \item UPC2: 643131378916
-        \end{itemize}
         \item Added more Quality Control features
-        \item Fixed the pricing bug
+        \begin{itemize}
+            \item Updated the flaw-no flaw dropdown with a specific checklist item for each flaw
+            \item Added the cursor auto focus on the relevant input field depending on the workflow
+        \end{itemize}
+        \item Fixed the pricing bug and had it so that a broken CPAP machine is half off while broken supplies are zero dollars
         \item Added Auto Clear functionality after UPCs are added
     \end{itemize}
 \end{frame}
@@ -38,6 +37,7 @@
         \item Format the notes better so that they are easier to read
         \item Testing
         \item Uploading images to Pipedrive via their API
+        \item Adding the Serial Number matching functionality
     \end{itemize}
 \end{frame}
 \begin{frame}{Tools Used}
@@ -46,6 +46,7 @@
         \item Pipedrive API
         \item UPCDatabase API
         \item Render
+        \item Redis
         \item ReactJS
         \item ExpressJS
     \end{itemize}
@@ -53,31 +54,43 @@
 \section{Changes of Scope}
 \begin{frame}{Changes of Scope}
     \begin{itemize}
-        \item None 
+        \item The scope of the project has changed because I need to add the serial number tracking capability to the project and potentially connect it to assetpanda 
     \end{itemize}
 \end{frame}
 \section{Measures}
 \begin{frame}{Measures}
     \begin{itemize}
-        \item Percent of tracking numbers found in Pipedrive 
-        \item Percent of SKUs found in each of the spreadsheets
-        \item Percent of Errors automatically corrected by fuzzy string matching
-        \item Percent of Errors manually corrected by Users
-        \item Turnaround time between item arriving and the SKU being added to the deal in Pipedrive
+        \item Percent of SKUs that have UPCs 
+        \item Sales Cycle Time: This year, we've taken 24 hours on average between received and Ready to be paid, which in the future could be reduced to under 8 hours (within one workday) 
+        \includegraphics[width = \linewidth]{salescycle.png}
     \end{itemize}
+\end{frame}
+\begin{frame}{Measures}
+    \begin{itemize}
+        \item Number of SKUs that have been added to the system
+        \item Number of SKUs that have been sold
+        \item Number of SKUs that have been scanned
+        \item Number of SKUs that have been matched to a Pipedrive deal
+        \item Number of SKUs that have been matched to a Pipedrive deal and have an image uploaded
+    \end{itemize}
+    \includegraphics[width = \linewidth]{deals.png}
+
 \end{frame}
 \section{Road Blocks}
 \begin{frame}{Road Blocks}
     \begin{itemize}
-        \item Updating flaw-no flaw dropdown with a specific checklist item for each flaw
-        \item Fixing the bug with the pricing
+        \item Writing to a new Spreadsheet with each scan of a CPAP machine
+        \item Connecting the Images to Pipedrive
+        \begin{itemize}
+            \item There may be problems with holding the images in my website because it would go over the data limits, so I'd either have to find a workaround or ditch the idea depending on how much space they are taking
+        \end{itemize}
     \end{itemize}
 \end{frame}
 \begin{frame}{Road Blocks}
     \includegraphics[width = \linewidth]{manualprompt.png}
 \end{frame}
 \begin{frame}{Road Blocks}
-    \includegraphics[width = \linewidth]{finished.png}
+    \includegraphics[height=.8\textheight]{imagetest.png}
 \end{frame}
 \begin{frame}{Road Blocks}
     \includegraphics[width = \linewidth]{automatch.png}

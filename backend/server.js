@@ -110,7 +110,8 @@ app.get("/api/excel/:filename", (req, res) => {
 
 // Barcode scan handler
 app.post("/api/barcode", async (req, res) => {
-  const { scanType, barcode, sessionId, price } = req.body;
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw } =
+    req.body;
   if (!scanType || !barcode || !sessionId) {
     return res
       .status(400)
@@ -173,17 +174,13 @@ app.post("/api/barcode", async (req, res) => {
 
       let calculatedPrice = 0;
       calculatedPrice = await getPriceForName(nameForPricing, req.body.qcFlaw);
-      const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
-        result.file
-      } - ${
-        result.row[result.matchedColumn]
-      }. Price: $${calculatedPrice}. Description: ${
+      const noteContent = `Price: $${calculatedPrice}. Description: ${
         result.row.Description || result.row.Name || result.row.Style || ""
       }${result.row.Size ? " Size: " + result.row.Size : ""}${
         req.body.qcFlaw && req.body.qcFlaw !== "none"
           ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
           : ""
-      }`;
+      }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`; // <-- Add this line
       if (!currentSession.noteContent) currentSession.noteContent = [];
       currentSession.noteContent.push(noteContent);
 

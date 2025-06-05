@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1749049104.21321 "c:/Users/krita/Asset/projectslides.tex" "projectslides.pdf" "projectslides" 1749049107.00626 0
+["pdflatex"] 1749134175.57183 "c:/Users/krita/Asset/projectslides.tex" "projectslides.pdf" "projectslides" 1749134178.81335 0
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1747443542 1004 54797486969f23fa377b128694d548df ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex8.tfm" 1747443542 988 bdf658c3bfc2d96d3c8b02cfc1c94c20 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-dist/fonts/tfm/public/amsfonts/symbols/msam10.tfm" 1747443542 916 f87d7c45f9c908e672703b83b72241a3 ""
@@ -191,16 +191,18 @@
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1748056213 94247 228f49d6bdf727739c5af6b97bd14a78 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf-var/web2c/pdftex/pdflatex.fmt" 1748056228 2166711 033c9cc88cc3c06729747ea52a0fe665 ""
   "c:/Users/krita/AppData/Roaming/TinyTeX/texmf.cnf" 1747443559 956 3a220487175abd462f2198e027963bed ""
-  "c:/Users/krita/Asset/projectslides.tex" 1749049097 3555 3363134e1e6863cc813a462414cc925c ""
+  "c:/Users/krita/Asset/projectslides.tex" 1749134174 4606 d9d2d53cf3709a2399099ffccd401e8f ""
   "c:/Users/krita/Pictures/Screenshots/automatch.png" 1748518210 121097 cfd49244d58a951471eb92af3afeb88e ""
-  "c:/Users/krita/Pictures/Screenshots/finished.png" 1748518041 135610 be0596423fffbec10083cd1134e735e1 ""
+  "c:/Users/krita/Pictures/Screenshots/deals.png" 1749133390 96706 55371690ede686fe87dfaaaf1dcab60b ""
+  "c:/Users/krita/Pictures/Screenshots/imagetest.png" 1749133720 22681 df2e6799d8fba7025a4769ad951c4887 ""
   "c:/Users/krita/Pictures/Screenshots/manualprompt.png" 1748517950 133201 6b7427ab6bc16b942b619f55d913c7ac ""
   "c:/Users/krita/Pictures/Screenshots/pipedrive.png" 1749048754 192186 d40296cf17943cfb0ab02ddb9f97bdb6 ""
-  "projectslides.aux" 1749049106 3628 15d427c443191ad18925b03cc8b66c36 "pdflatex"
-  "projectslides.nav" 1749049106 2267 7a4360b2d5ac2610cab64681f22ddc03 "pdflatex"
-  "projectslides.out" 1749049106 551 4a323333cf1b5c0f67645226ab325b88 "pdflatex"
-  "projectslides.tex" 1749049097 3555 3363134e1e6863cc813a462414cc925c ""
-  "projectslides.toc" 1749049106 244 b8038ae665cda457a1f548af80c6e247 "pdflatex"
+  "c:/Users/krita/Pictures/Screenshots/salescycle.png" 1749132084 53976 f1ac2ada4c1237743822fee81d55ca23 ""
+  "projectslides.aux" 1749134178 3756 b2b5db765c094b58005aefdaa16bbe9d "pdflatex"
+  "projectslides.nav" 1749134178 2359 c05904b590ad299dc637adcd27e1a859 "pdflatex"
+  "projectslides.out" 1749134178 551 4a323333cf1b5c0f67645226ab325b88 "pdflatex"
+  "projectslides.tex" 1749134174 4606 d9d2d53cf3709a2399099ffccd401e8f ""
+  "projectslides.toc" 1749134178 244 9b7d9105e5c30e8f6591b5fff63cec37 "pdflatex"
   (generated)
   "projectslides.aux"
   "projectslides.log"

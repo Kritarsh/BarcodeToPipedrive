@@ -23,5 +23,6 @@
   },
   "[java]": {
     "editor.defaultFormatter": "redhat.java"
-  }
+  },
+  "cSpell.words": ["Pipedrive"]
 }
