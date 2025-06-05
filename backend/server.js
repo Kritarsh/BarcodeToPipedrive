@@ -15,6 +15,7 @@ import {
   matchDescriptionWithDatabase,
   returnProductDescription,
   getPriceForName,
+  appendMachineSpecific,
 } from "./skumatcher.js";
 
 dotenv.config();
@@ -244,6 +245,37 @@ app.post("/api/barcode", async (req, res) => {
         serialNumber: serialNumber || "",
         price: calculatedPrice,
       });
+
+      // Only log machines (not supplies) - adjust this check as needed
+      const machineKeywords = [
+        "AirSense 10",
+        "AirSense 11",
+        "AirCurve VAuto",
+        "AirCurve ASV",
+        "AirCurve ST",
+        "Trilogy Evo",
+        "AirMini AutoSet",
+        "Astral",
+        "Series 9 AutoSet",
+        "Series 9 CPAP",
+        "Series 9 BiPAP",
+        "Series 9 Elite",
+      ];
+      const name =
+        result.row.Name || result.row.Description || result.row.Style || "";
+      if (
+        machineKeywords.some((keyword) =>
+          (name || "").toLowerCase().includes(keyword.toLowerCase())
+        )
+      ) {
+        appendMachineSpecific({
+          name,
+          upc: barcode,
+          serialNumber: serialNumber || "",
+          quantity: 1,
+          date: new Date(),
+        });
+      }
 
       await setSession(sessionId, currentSession);
 

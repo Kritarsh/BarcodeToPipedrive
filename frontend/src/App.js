@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, use } from "react";
 import axios from "axios";
+import ReactWebcam from "react-webcam"; // Add this import at the top
 const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
   const [totalPrice, setTotalPrice] = useState(0);
   const [requireSerial, setRequireSerial] = useState(false);
   const [serialNumber, setSerialNumber] = useState("");
+  const [showWebcam, setShowWebcam] = useState(false);
   const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
   const serialKeywords = [
@@ -42,6 +44,7 @@ function App() {
     "Series 9 BiPAP",
     "Series 9 Elite",
   ];
+  const webcamRef = useRef(null);
 
   const setSkuInputAndFocus = (el) => {
     skuInputRef.current = el;
@@ -84,6 +87,11 @@ function App() {
       }, 0);
     }
   }, [dealFound, sku]);
+  useEffect(() => {
+    if (showManualRef && manualRefInputRef.current) {
+      manualRefInputRef.current.focus();
+    }
+  }, [showManualRef]);
   const handleTrackingSubmit = async (e) => {
     e.preventDefault();
     setMessage("Searching for Tracking Number...");
@@ -152,11 +160,6 @@ function App() {
         setPendingSku(sku); // Store the SKU for manual reference
       }
       setSku("");
-      useEffect(() => {
-        if (showManualRef && manualRefInputRef.current) {
-          manualRefInputRef.current.focus();
-        }
-      }, [showManualRef]);
 
       // --- USE PRICE FROM BACKEND ONLY ---
       console.log("Price from backend:", res.data.price);
@@ -248,48 +251,102 @@ function App() {
               Scan Tracking
             </button>
           </form>
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold text-white mb-2">
-              Attach Image to Deal
-            </h2>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!dealFound || !trackingNumber) {
-                  setMessage("Scan a tracking number first.");
-                  return;
-                }
-                const fileInput = e.target.elements.imageFile;
-                if (!fileInput.files[0]) {
-                  setMessage("Please select an image file.");
-                  return;
-                }
-                const formData = new FormData();
-                formData.append("image", fileInput.files[0]);
-                formData.append("sessionId", sessionId);
-                formData.append("trackingNumber", trackingNumber);
-
-                try {
-                  await axios.post(`${apiUrl}/api/upload-image`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                  });
-                  setMessage("Image uploaded and attached to deal!");
-                } catch (err) {
-                  setMessage("Failed to upload image.");
-                }
-              }}
-            >
-              <input
-                type="file"
-                name="imageFile"
-                accept="image/*"
-                className="mb-2"
-              />
-              <button type="submit" className="btn btn-info w-full">
-                Upload Image
+          {!dealFound && (
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-2">
+                Attach Image to Deal
+              </h2>
+              <button
+                type="button"
+                className="btn btn-secondary mb-2"
+                onClick={() => setShowWebcam((prev) => !prev)}
+              >
+                {showWebcam ? "Hide Webcam" : "Use Webcam"}
               </button>
-            </form>
-          </div>
+              {showWebcam && (
+                <div className="mb-2">
+                  <ReactWebcam
+                    audio={false}
+                    ref={webcamRef}
+                    screenshotFormat="image/jpeg"
+                    width={320}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-accent mt-2"
+                    onClick={async () => {
+                      const imageSrc = webcamRef.current.getScreenshot();
+                      if (!imageSrc) {
+                        setMessage("Failed to capture image.");
+                        return;
+                      }
+                      // Convert base64 to Blob
+                      const res = await fetch(imageSrc);
+                      const blob = await res.blob();
+                      const formData = new FormData();
+                      formData.append("image", blob, "webcam.jpg");
+                      formData.append("sessionId", sessionId);
+                      formData.append("trackingNumber", trackingNumber);
+
+                      try {
+                        await axios.post(
+                          `${apiUrl}/api/upload-image`,
+                          formData,
+                          {
+                            headers: { "Content-Type": "multipart/form-data" },
+                          }
+                        );
+                        setMessage(
+                          "Webcam image uploaded and attached to deal!"
+                        );
+                      } catch (err) {
+                        setMessage("Failed to upload webcam image.");
+                      }
+                    }}
+                  >
+                    Capture & Upload
+                  </button>
+                </div>
+              )}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!trackingNumber) {
+                    setMessage("Scan a tracking number first.");
+                    return;
+                  }
+                  const fileInput = e.target.elements.imageFile;
+                  if (!fileInput.files[0]) {
+                    setMessage("Please select an image file.");
+                    return;
+                  }
+                  const formData = new FormData();
+                  formData.append("image", fileInput.files[0]);
+                  formData.append("sessionId", sessionId);
+                  formData.append("trackingNumber", trackingNumber);
+
+                  try {
+                    await axios.post(`${apiUrl}/api/upload-image`, formData, {
+                      headers: { "Content-Type": "multipart/form-data" },
+                    });
+                    setMessage("Image uploaded and attached to deal!");
+                  } catch (err) {
+                    setMessage("Failed to upload image.");
+                  }
+                }}
+              >
+                <input
+                  type="file"
+                  name="imageFile"
+                  accept="image/*"
+                  className="mb-2"
+                />
+                <button type="submit" className="btn btn-info w-full">
+                  Upload Image
+                </button>
+              </form>
+            </div>
+          )}
           {dealFound && (
             <>
               <form onSubmit={handleSkuSubmit} className="mb-6">

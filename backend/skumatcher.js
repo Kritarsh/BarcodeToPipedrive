@@ -29,7 +29,7 @@ const priceRules = [
   { keyword: "Series 9 BiPAP", price: 5 },
   { keyword: "Series 9 Elite", price: 5 },
   { keyword: "CoughAssist T70", price: 250 },
-  { keyword: "Oxygen Concentrator", price: 50 }
+  { keyword: "Oxygen Concentrator", price: 50 },
 ];
 
 export function getPriceForName(name, flaw) {
@@ -38,11 +38,18 @@ export function getPriceForName(name, flaw) {
   for (const rule of priceRules) {
     if (name.toLowerCase().includes(rule.keyword.toLowerCase())) {
       price += rule.price;
-      if(flaw != 'none' && (rule.keyword.toLowerCase().includes("mask") || rule.keyword.toLowerCase().includes("Cushion") || rule.keyword.toLowerCase().includes("Water Chamber") || rule.keyword.toLowerCase().includes("Heated Tubing") || rule.keyword.toLowerCase().includes("Standard Tubing") || rule.keyword.toLowerCase().includes("Filters") )) {
-        price = 0; 
-      }
-      else if(flaw != 'none'){
-        price = rule.price * 0.5; 
+      if (
+        flaw != "none" &&
+        (rule.keyword.toLowerCase().includes("mask") ||
+          rule.keyword.toLowerCase().includes("Cushion") ||
+          rule.keyword.toLowerCase().includes("Water Chamber") ||
+          rule.keyword.toLowerCase().includes("Heated Tubing") ||
+          rule.keyword.toLowerCase().includes("Standard Tubing") ||
+          rule.keyword.toLowerCase().includes("Filters"))
+      ) {
+        price = 0;
+      } else if (flaw != "none") {
+        price = rule.price * 0.5;
       }
     }
   }
@@ -95,7 +102,7 @@ export async function matchSkuWithDatabase(barcode) {
         params: { apikey: UPC_API_KEY },
       }
     );
-    productInfo = upcRes. data;
+    productInfo = upcRes.data;
   } catch (err) {
     console.error("UPC API error:", err.message);
     return { match: false, reason: "UPC API error" };
@@ -293,4 +300,43 @@ export async function writeUPCToSpreadsheet({
     workbook.Sheets[sheetName] = newSheet;
     xlsx.writeFile(workbook, filePath);
   }
+}
+export function appendMachineSpecific({
+  name,
+  upc,
+  serialNumber,
+  quantity = 1,
+  date = new Date(),
+}) {
+  const filePath = join(__dirname, "machinespecifics.xlsx");
+  let workbook, worksheet, data;
+
+  try {
+    workbook = xlsx.readFile(filePath);
+    worksheet = workbook.Sheets[workbook.SheetNames[0]];
+    data = xlsx.utils.sheet_to_json(worksheet);
+  } catch (err) {
+    // If file doesn't exist, create new
+    workbook = xlsx.utils.book_new();
+    data = [];
+  }
+
+  // Prepare new row
+  const newRow = {
+    Date: date.toISOString().split("T")[0],
+    Quantity: quantity,
+    Name: name,
+    UPC: upc,
+    "Serial Number": serialNumber,
+  };
+
+  data.push(newRow);
+
+  // Convert back to worksheet and save
+  const newSheet = xlsx.utils.json_to_sheet(data, {
+    header: ["Date", "Quantity", "Name", "UPC", "Serial Number"],
+  });
+  workbook.SheetNames[0] = workbook.SheetNames[0] || "Sheet1";
+  workbook.Sheets[workbook.SheetNames[0]] = newSheet;
+  xlsx.writeFile(workbook, filePath);
 }
