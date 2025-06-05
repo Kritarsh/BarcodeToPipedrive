@@ -123,17 +123,59 @@ app.post("/api/barcode", async (req, res) => {
       const oldSession = await getSession(sessionId);
       if (
         oldSession &&
-        oldSession.noteContent &&
-        oldSession.noteContent.length > 0 &&
+        oldSession.skuEntries &&
+        oldSession.skuEntries.length > 0 &&
         oldSession.dealId
       ) {
-        const allNotes = oldSession.noteContent.join("\n");
-        const total = oldSession.prices
-          ? oldSession.prices.reduce((acc, price) => acc + price, 0)
-          : 0;
-        const allNotesWithTotal = `${allNotes}\nTotal Price: $${total.toFixed(
-          2
-        )}`;
+        // Group non-flawed
+        const nonFlawed = {};
+        // Group flawed by description
+        const flawed = {};
+
+        for (const entry of oldSession.skuEntries) {
+          const desc = `${entry.description}${
+            entry.size ? " Size: " + entry.size : ""
+          }`;
+          if (!entry.qcFlaw || entry.qcFlaw === "none") {
+            nonFlawed[desc] = (nonFlawed[desc] || 0) + 1;
+          } else {
+            if (!flawed[desc]) flawed[desc] = [];
+            flawed[desc].push(entry);
+          }
+        }
+
+        // Build summary strings
+        const nonFlawedSummary = Object.entries(nonFlawed)
+          .map(([desc, count]) => `${count} × ${desc}`)
+          .join("\n");
+
+        const flawedSummary = Object.entries(flawed)
+          .map(([desc, entries]) =>
+            entries
+              .map(
+                (entry) =>
+                  `Flawed: ${desc} [Flaw: ${qcFlawLabel(entry.qcFlaw)}]${
+                    entry.serialNumber ? ` Serial: ${entry.serialNumber}` : ""
+                  }`
+              )
+              .join("\n")
+          )
+          .join("\n");
+
+        const total =
+          oldSession.skuEntries.reduce(
+            (sum, entry) => sum + (Number(entry.price) || 0),
+            0
+          ) || 0;
+
+        const allNotesWithTotal = [
+          nonFlawedSummary,
+          flawedSummary,
+          `Total Price: $${total.toFixed(2)}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
         await addNoteToPipedrive(allNotesWithTotal, oldSession.dealId);
       }
       // Now reset for new tracking number
@@ -144,7 +186,12 @@ app.post("/api/barcode", async (req, res) => {
           .status(404)
           .json({ error: "Deal not found for tracking number" });
       }
-      await setSession(sessionId, { dealId, noteContent: [], prices: [] });
+      await setSession(sessionId, {
+        dealId,
+        noteContent: [],
+        prices: [],
+        skuEntries: [],
+      });
       return res.json({ message: "Deal found", dealId });
     }
 
@@ -187,6 +234,17 @@ app.post("/api/barcode", async (req, res) => {
       if (!currentSession.prices) currentSession.prices = [];
       currentSession.prices.push(calculatedPrice);
 
+      // When adding a SKU scan to the session:
+      if (!currentSession.skuEntries) currentSession.skuEntries = [];
+      currentSession.skuEntries.push({
+        description:
+          result.row.Description || result.row.Name || result.row.Style || "",
+        size: result.row.Size || "",
+        qcFlaw: req.body.qcFlaw,
+        serialNumber: serialNumber || "",
+        price: calculatedPrice,
+      });
+
       await setSession(sessionId, currentSession);
 
       return res.json({
@@ -204,7 +262,15 @@ app.post("/api/barcode", async (req, res) => {
 
 // Manual reference and description fallback
 app.post("/api/barcode/manual", async (req, res) => {
-  const { barcode, manualRef, sessionId, description, price } = req.body;
+  const {
+    barcode,
+    manualRef,
+    sessionId,
+    description,
+    price,
+    serialNumber,
+    qcFlaw,
+  } = req.body;
   if (!barcode || !manualRef || !sessionId) {
     return res
       .status(400)
@@ -226,16 +292,17 @@ app.post("/api/barcode/manual", async (req, res) => {
 
     // FIX: define noteContent with const or let
     const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
-      result.file
+      matchResult.file
     } - ${
-      result.row[result.matchedColumn]
+      matchResult.row[matchResult.matchedColumn]
     }. Price: $${calculatedPrice}. Description: ${
-      result.row.Description || result.row.Name || result.row.Style || ""
-    }${result.row.Size ? " Size: " + result.row.Size : ""}${
-      req.body.qcFlaw && req.body.qcFlaw !== "none"
-        ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
-        : ""
-    }`;
+      matchResult.row.Description ||
+      matchResult.row.Name ||
+      matchResult.row.Style ||
+      ""
+    }${matchResult.row.Size ? " Size: " + matchResult.row.Size : ""}${
+      qcFlaw && qcFlaw !== "none" ? ` [Flaw: ${qcFlawLabel(qcFlaw)}]` : ""
+    }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`; // <-- Add this line
     if (!session[sessionId]) session[sessionId] = { noteContent: [] };
     if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
     session[sessionId].noteContent.push(noteContent);
