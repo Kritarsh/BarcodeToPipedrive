@@ -12,7 +12,6 @@ function App() {
   const [spreadsheetMatch, setSpreadsheetMatch] = useState(null);
   const [excelData, setExcelData] = useState({
     "Inventory Supplies 2024.xlsx": [],
-    "MagentoInventory.xlsx": [],
     "Overstock supplies other companies.xlsx": [],
   });
   const [selectedFile, setSelectedFile] = useState(
@@ -56,7 +55,6 @@ function App() {
   useEffect(() => {
     const files = [
       "Inventory Supplies 2024.xlsx",
-      "MagentoInventory.xlsx",
       "Overstock supplies other companies.xlsx",
     ];
     files.forEach(async (file) => {

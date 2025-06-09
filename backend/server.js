@@ -6,7 +6,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import { createClient } from "redis";
-
+import multer from "multer";
 import { addNoteToPipedrive } from "./pipedrive.js";
 import {
   matchSkuWithDatabase,
@@ -16,7 +16,7 @@ import {
   returnProductDescription,
   getPriceForName,
   appendMachineSpecific,
-} from "./skumatcher.js";
+} from "./skuMatcher.js";
 
 dotenv.config();
 
@@ -92,7 +92,6 @@ app.get("/api/excel/:filename", (req, res) => {
   console.log("Fetching file:", filename);
   const allowedFiles = [
     "Inventory Supplies 2024.xlsx",
-    "MagentoInventory.xlsx",
     "Overstock supplies other companies.xlsx",
   ];
   if (!allowedFiles.includes(filename)) {
@@ -394,6 +393,22 @@ app.post("/api/barcode/manual", async (req, res) => {
     reason: matchResult.reason,
     spreadsheetMatch: null,
   });
+});
+
+// Image upload handler
+const upload = multer({ dest: "uploads/" }); // or configure as needed
+
+app.post("/api/upload-image", upload.single("image"), async (req, res) => {
+  try {
+    // req.file contains the uploaded file
+    // req.body.sessionId and req.body.trackingNumber are available if sent as form fields
+    // You can move the file, process it, or attach it to a deal as needed
+
+    // Example: respond with file info
+    res.json({ message: "Image uploaded!", file: req.file });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to upload image" });
+  }
 });
 
 // --- Start Server ---

@@ -59,7 +59,6 @@ export async function matchSkuWithDatabase(barcode) {
   // 1. Check spreadsheets first
   const spreadsheetFiles = [
     { file: "Inventory Supplies 2024.xlsx", columns: ["UPC"] },
-    { file: "MagentoInventory.xlsx", columns: ["UPC"] },
     { file: "Overstock supplies other companies.xlsx", columns: ["UPC"] },
   ];
 
@@ -126,7 +125,6 @@ export async function matchSkuWithDatabase(barcode) {
 export async function matchSkuWithDatabaseManual(barcode, manualRef) {
   const spreadsheetFiles = [
     { file: "Inventory Supplies 2024.xlsx", columns: ["Ref #"] },
-    { file: "MagentoInventory.xlsx", columns: ["Thumbnail", "SKU"] },
     { file: "Overstock supplies other companies.xlsx", columns: ["Ref #"] },
   ];
 
@@ -188,9 +186,6 @@ export async function returnProductDescription({
   const sheet = workbook.Sheets[sheetName];
   const data = xlsx.utils.sheet_to_json(sheet);
   const relevantColumns = ["MFR", "Style", "Size"];
-  if (file === "MagentoInventory.xlsx") {
-    const relevantColumns = ["Name", "Attribute Set"];
-  }
 
   for (const row of data) {
     if (
@@ -219,7 +214,6 @@ export async function returnProductDescription({
 export async function matchDescriptionWithDatabase(description) {
   const spreadsheetFiles = [
     { file: "Inventory Supplies 2024.xlsx", columns: ["MFR", "Style", "Size"] },
-    { file: "MagentoInventory.xlsx", columns: ["Name", "Attribute"] },
     {
       file: "Overstock supplies other companies.xlsx",
       columns: ["MFR", "Style", "Size"],
