@@ -16,6 +16,7 @@ import {
   returnProductDescription,
   getPriceForName,
   appendMachineSpecific,
+  incrementSupplyQuantity,
 } from "./skuMatcher.js";
 
 dotenv.config();
@@ -262,6 +263,10 @@ app.post("/api/barcode", async (req, res) => {
       ];
       const name =
         result.row.Name || result.row.Description || result.row.Style || "";
+      const size = result.row.Size || "";
+      const upc = barcode;
+
+      // Only log machines (not supplies)
       if (
         machineKeywords.some((keyword) =>
           (name || "").toLowerCase().includes(keyword.toLowerCase())
@@ -269,8 +274,19 @@ app.post("/api/barcode", async (req, res) => {
       ) {
         appendMachineSpecific({
           name,
-          upc: barcode,
+          upc,
           serialNumber: serialNumber || "",
+          quantity: 1,
+          date: new Date(),
+        });
+      } else {
+        // Supplies: increment quantity in the correct spreadsheet
+        // Use result.file to determine which spreadsheet to update
+        incrementSupplyQuantity({
+          file: result.file, // "Inventory Supplies 2024.xlsx" or "Overstock supplies other companies.xlsx"
+          name,
+          upc,
+          size,
           quantity: 1,
           date: new Date(),
         });

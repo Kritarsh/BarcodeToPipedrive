@@ -334,3 +334,55 @@ export function appendMachineSpecific({
   workbook.Sheets[workbook.SheetNames[0]] = newSheet;
   xlsx.writeFile(workbook, filePath);
 }
+export function incrementSupplyQuantity({
+  file,
+  name,
+  upc,
+  size = "",
+  quantity = 1,
+  date = new Date(),
+}) {
+  const filePath = join(__dirname, file);
+  let workbook, worksheet, data;
+
+  try {
+    workbook = xlsx.readFile(filePath);
+    worksheet = workbook.Sheets[workbook.SheetNames[0]];
+    data = xlsx.utils.sheet_to_json(worksheet);
+  } catch (err) {
+    // If file doesn't exist, create new
+    workbook = xlsx.utils.book_new();
+    data = [];
+  }
+
+  // Try to find an existing row with the same Name, UPC, and Size
+  const existingRow = data.find(
+    (row) =>
+      row.Name === name && row.UPC === upc && (row.Size || "") === (size || "")
+  );
+
+  if (existingRow) {
+    // Increment the quantity
+    existingRow.Quantity = Number(existingRow.Quantity || 1) + quantity;
+    // Optionally, update the date to the latest
+    existingRow.Date = date.toISOString().split("T")[0];
+  } else {
+    // Prepare new row
+    const newRow = {
+      Date: date.toISOString().split("T")[0],
+      Quantity: quantity,
+      Name: name,
+      UPC: upc,
+      Size: size,
+    };
+    data.push(newRow);
+  }
+
+  // Convert back to worksheet and save
+  const newSheet = xlsx.utils.json_to_sheet(data, {
+    header: ["Date", "Quantity", "Name", "UPC", "Size"],
+  });
+  workbook.SheetNames[0] = workbook.SheetNames[0] || "Sheet1";
+  workbook.Sheets[workbook.SheetNames[0]] = newSheet;
+  xlsx.writeFile(workbook, filePath);
+}

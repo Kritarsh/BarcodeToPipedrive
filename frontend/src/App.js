@@ -6,6 +6,7 @@ const apiUrl = process.env.REACT_APP_API_URL;
 function App() {
   const [sessionId] = useState(() => Math.random().toString(36).substr(2, 9));
   const [trackingNumber, setTrackingNumber] = useState("");
+  const [lastTrackingNumber, setLastTrackingNumber] = useState(""); // <-- Added state for last tracking number
   const [sku, setSku] = useState("");
   const [dealFound, setDealFound] = useState(false);
   const [message, setMessage] = useState("");
@@ -101,6 +102,7 @@ function App() {
       });
       setDealFound(true);
       setMessage("Tracking Number found! Now scan SKU.");
+      setLastTrackingNumber(trackingNumber); // <-- add this
     } catch (err) {
       setMessage(err.response?.data?.error || "Deal not found.");
     }
@@ -321,7 +323,7 @@ function App() {
                   const formData = new FormData();
                   formData.append("image", fileInput.files[0]);
                   formData.append("sessionId", sessionId);
-                  formData.append("trackingNumber", trackingNumber);
+                  formData.append("trackingNumber", lastTrackingNumber || trackingNumber);
 
                   try {
                     await axios.post(`${apiUrl}/api/upload-image`, formData, {
