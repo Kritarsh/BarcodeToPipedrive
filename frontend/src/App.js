@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef, use } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import ReactWebcam from "react-webcam"; // Add this import at the top
+import TrackingForm from "./TrackingForm";
+import SkuForm from "./SkuForm";
+import ManualRefForm from "./ManualRefForm";
+import ImageUpload from "./ImageUpload";
 const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
   const [sessionId] = useState(() => Math.random().toString(36).substr(2, 9));
   const [trackingNumber, setTrackingNumber] = useState("");
-  const [lastTrackingNumber, setLastTrackingNumber] = useState(""); // <-- Added state for last tracking number
   const [sku, setSku] = useState("");
   const [dealFound, setDealFound] = useState(false);
   const [message, setMessage] = useState("");
@@ -20,7 +22,7 @@ function App() {
   );
   const [showManualRef, setShowManualRef] = useState(false);
   const [manualRef, setManualRef] = useState("");
-  const [pendingSku, setPendingSku] = useState(""); // Store the SKU for manual ref
+  const [pendingSku, setPendingSku] = useState("");
   const [descriptionResult, setDescriptionResult] = useState("");
   const [qcFlaw, setQcFlaw] = useState("none");
   const [price, setPrice] = useState(null);
@@ -28,9 +30,13 @@ function App() {
   const [requireSerial, setRequireSerial] = useState(false);
   const [serialNumber, setSerialNumber] = useState("");
   const [showWebcam, setShowWebcam] = useState(false);
+  const [selectedMachine, setSelectedMachine] = useState("");
   const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
-  const serialKeywords = [
+  const manualRefInputRef = useRef(null);
+  const webcamRef = useRef(null);
+
+  const cpapMachines = [
     "AirSense 10",
     "AirSense 11",
     "AirCurve VAuto",
@@ -43,16 +49,15 @@ function App() {
     "Series 9 CPAP",
     "Series 9 BiPAP",
     "Series 9 Elite",
+    "CoughAssist T70",
+    "Oxygen Concentrator",
   ];
-  const webcamRef = useRef(null);
 
   const setSkuInputAndFocus = (el) => {
     skuInputRef.current = el;
-    if (el) {
-      el.focus();
-    }
+    if (el) el.focus();
   };
-  const manualRefInputRef = useRef(null);
+
   useEffect(() => {
     const files = [
       "Inventory Supplies 2024.xlsx",
@@ -72,6 +77,7 @@ function App() {
       }
     });
   }, []);
+
   useEffect(() => {
     if (!dealFound && trackingInputRef.current) {
       trackingInputRef.current.focus();
@@ -80,9 +86,7 @@ function App() {
   useEffect(() => {
     if (dealFound) {
       setTimeout(() => {
-        if (skuInputRef.current) {
-          skuInputRef.current.focus();
-        }
+        if (skuInputRef.current) skuInputRef.current.focus();
       }, 0);
     }
   }, [dealFound, sku]);
@@ -91,6 +95,7 @@ function App() {
       manualRefInputRef.current.focus();
     }
   }, [showManualRef]);
+
   const handleTrackingSubmit = async (e) => {
     e.preventDefault();
     setMessage("Searching for Tracking Number...");
@@ -102,27 +107,71 @@ function App() {
       });
       setDealFound(true);
       setMessage("Tracking Number found! Now scan SKU.");
-      setLastTrackingNumber(trackingNumber); // <-- add this
     } catch (err) {
+      // If not found, try again with first 8 characters removed
+      if (
+        trackingNumber.length > 8 &&
+        (!err.response || err.response.status === 404)
+      ) {
+        const trimmedTracking = trackingNumber.slice(8);
+        setMessage("Retrying with trimmed tracking number...");
+        try {
+          const res = await axios.post(`${apiUrl}/api/barcode`, {
+            scanType: "tracking",
+            barcode: trimmedTracking,
+            sessionId,
+          });
+          setDealFound(true);
+          setTrackingNumber(trimmedTracking); // update state to reflect the trimmed value
+          setMessage("Tracking Number found after retry! Now scan SKU.");
+          return;
+        } catch (retryErr) {
+          setMessage(
+            retryErr.response?.data?.error ||
+              "Deal not found, even after retrying."
+          );
+          return;
+        }
+      }
       setMessage(err.response?.data?.error || "Deal not found.");
     }
   };
 
   const handleSkuSubmit = async (e) => {
     e.preventDefault();
-    setMessage("Checking SKU...");
+    setMessage(selectedMachine ? "Adding machine..." : "Checking SKU...");
     setShowManualRef(false);
     setManualRef("");
     setPrice(null);
 
     try {
+      if (selectedMachine) {
+        // Send machine and serial number
+        const res = await axios.post(`${apiUrl}/api/barcode`, {
+          scanType: "sku",
+          barcode: selectedMachine,
+          sessionId,
+          qcFlaw,
+          serialNumber: sku, // sku field is used for serial number here
+        });
+        setSpreadsheetMatch(res.data.spreadsheetMatch);
+        setMessage("Machine added and note attached!");
+        setPrice(res.data.price);
+        if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
+          setTotalPrice((prev) => prev + res.data.price);
+        }
+        setSelectedMachine("");
+        setSku("");
+        return;
+      }
+
+      // Normal UPC flow
       const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "sku",
         barcode: sku,
         sessionId,
-        qcFlaw, // send QC flaw to backend if needed
+        qcFlaw,
       });
-      // Try to get the name/description from the backend response
       const nameForSerialCheck =
         (res.data.row &&
           (res.data.row.Name ||
@@ -139,33 +188,26 @@ function App() {
           : "SKU not found, note added."
       );
 
-      // Check if serial is required
       if (
-        serialKeywords.some((keyword) =>
+        cpapMachines.some((keyword) =>
           (nameForSerialCheck || "")
             .toLowerCase()
             .includes(keyword.toLowerCase())
         )
       ) {
         setRequireSerial(true);
-        // Optionally store the current SKU for later submission with serial
         setPendingSku(sku);
-        setSku(""); // clear the input
-        return; // Don't proceed until serial is entered
+        setSku("");
+        return;
       }
 
-      // Show manual reference form if not found
       if (!res.data.spreadsheetMatch) {
         setShowManualRef(true);
-        setPendingSku(sku); // Store the SKU for manual reference
+        setPendingSku(sku);
       }
       setSku("");
-
-      // --- USE PRICE FROM BACKEND ONLY ---
-      console.log("Price from backend:", res.data.price);
       setPrice(res.data.price);
 
-      // Only add to total if not a QC flaw and price is a number
       if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
         setTotalPrice((prev) => prev + res.data.price);
       }
@@ -178,7 +220,6 @@ function App() {
     e.preventDefault();
     setMessage("Checking manual reference...");
     setDescriptionResult("");
-    // Try to get a description from the selected Excel row (if available)
     let description = "";
     const selectedRows = excelData[selectedFile];
     const matchedRow = selectedRows.find((row) =>
@@ -219,7 +260,6 @@ function App() {
     }
   };
 
-  // --- Inline Excel Viewer UI ---
   const fileOptions = Object.keys(excelData);
 
   return (
@@ -229,183 +269,66 @@ function App() {
           <h1 className="card-title text-3xl justify mb-6 text-primary">
             Barcode to Pipedrive
           </h1>
-          <form onSubmit={handleTrackingSubmit} className="mb-6">
-            <label className="block mb-2 font-medium text-white">
-              Tracking Number:
-              <input
-                type="text"
-                value={trackingNumber}
-                onChange={(e) => setTrackingNumber(e.target.value)}
-                required
-                disabled={dealFound}
-                ref={trackingInputRef}
-                className="input input-bordered w-full mt-1 disabled:bg-base-200"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={dealFound}
-              className="btn btn-primary w-full"
-            >
-              Scan Tracking
-            </button>
-          </form>
-          {!dealFound && (
-            <div className="mb-6">
-              <h2 className="text-lg font-semibold text-white mb-2">
-                Attach Image to Deal
-              </h2>
-              <button
-                type="button"
-                className="btn btn-secondary mb-2"
-                onClick={() => setShowWebcam((prev) => !prev)}
-              >
-                {showWebcam ? "Hide Webcam" : "Use Webcam"}
-              </button>
-              {showWebcam && (
-                <div className="mb-2">
-                  <ReactWebcam
-                    audio={false}
-                    ref={webcamRef}
-                    screenshotFormat="image/jpeg"
-                    width={320}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-accent mt-2"
-                    onClick={async () => {
-                      const imageSrc = webcamRef.current.getScreenshot();
-                      if (!imageSrc) {
-                        setMessage("Failed to capture image.");
-                        return;
-                      }
-                      // Convert base64 to Blob
-                      const res = await fetch(imageSrc);
-                      const blob = await res.blob();
-                      const formData = new FormData();
-                      formData.append("image", blob, "webcam.jpg");
-                      formData.append("sessionId", sessionId);
-                      formData.append("trackingNumber", trackingNumber);
-
-                      try {
-                        await axios.post(
-                          `${apiUrl}/api/upload-image`,
-                          formData,
-                          {
-                            headers: { "Content-Type": "multipart/form-data" },
-                          }
-                        );
-                        setMessage(
-                          "Webcam image uploaded and attached to deal!"
-                        );
-                      } catch (err) {
-                        setMessage("Failed to upload webcam image.");
-                      }
-                    }}
-                  >
-                    Capture & Upload
-                  </button>
-                </div>
-              )}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!trackingNumber) {
-                    setMessage("Scan a tracking number first.");
-                    return;
-                  }
-                  const fileInput = e.target.elements.imageFile;
-                  if (!fileInput.files[0]) {
-                    setMessage("Please select an image file.");
-                    return;
-                  }
-                  const formData = new FormData();
-                  formData.append("image", fileInput.files[0]);
-                  formData.append("sessionId", sessionId);
-                  formData.append("trackingNumber", lastTrackingNumber || trackingNumber);
-
-                  try {
-                    await axios.post(`${apiUrl}/api/upload-image`, formData, {
-                      headers: { "Content-Type": "multipart/form-data" },
-                    });
-                    setMessage("Image uploaded and attached to deal!");
-                  } catch (err) {
-                    setMessage("Failed to upload image.");
-                  }
-                }}
-              >
-                <input
-                  type="file"
-                  name="imageFile"
-                  accept="image/*"
-                  className="mb-2"
-                />
-                <button type="submit" className="btn btn-info w-full">
-                  Upload Image
-                </button>
-              </form>
-            </div>
-          )}
+          <TrackingForm
+            trackingNumber={trackingNumber}
+            setTrackingNumber={setTrackingNumber}
+            dealFound={dealFound}
+            trackingInputRef={trackingInputRef}
+            onSubmit={handleTrackingSubmit}
+          />
           {dealFound && (
             <>
-              <form onSubmit={handleSkuSubmit} className="mb-6">
+              {/* CPAP Machine Dropdown */}
+              <div className="mb-4">
                 <label className="block mb-2 font-medium text-white">
-                  UPC:
-                  <input
-                    type="text"
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    required
-                    ref={setSkuInputAndFocus}
-                    className="input input-bordered w-full mt-1"
-                    disabled={showManualRef} // <-- Disable when manual ref is active
-                  />
-                </label>
-                <label className="block mb-2 font-medium text-white">
-                  Quality Control:
+                  Or select a CPAP machine:
                   <select
-                    value={qcFlaw}
-                    onChange={(e) => setQcFlaw(e.target.value)}
                     className="select select-bordered w-full mt-1"
-                    disabled={showManualRef} // <-- Disable when manual ref is active
+                    value={selectedMachine}
+                    onChange={async (e) => {
+                      const machine = e.target.value;
+                      setSelectedMachine(machine);
+                      setSku(""); // clear the input for serial number entry
+                    }}
                   >
-                    <option value="none">No Flaw</option>
-                    <option value="flaw">Missing Part </option>
-                    <option value="damaged">Damaged</option>
-                    <option value="other">Not in Original Packaging</option>
+                    <option value="">-- Select a machine --</option>
+                    {cpapMachines.map((machine) => (
+                      <option key={machine} value={machine}>
+                        {machine}
+                      </option>
+                    ))}
                   </select>
                 </label>
-                <button
-                  type="submit"
-                  className="btn btn-success w-full"
-                  disabled={showManualRef}
-                >
-                  Scan UPC
-                </button>
-              </form>
+              </div>
+              <SkuForm
+                sku={sku}
+                setSku={setSku}
+                handleSkuSubmit={handleSkuSubmit}
+                setSkuInputAndFocus={setSkuInputAndFocus}
+                showManualRef={showManualRef}
+                qcFlaw={qcFlaw}
+                setQcFlaw={setQcFlaw}
+              />
               {showManualRef && (
-                <form onSubmit={handleManualRefSubmit} className="mb-6">
-                  <label className="block mb-2 font-medium text-white">
-                    Manual Reference Number:
-                    <input
-                      type="text"
-                      value={manualRef}
-                      onChange={(e) => setManualRef(e.target.value)}
-                      required
-                      className="input input-bordered w-full mt-1"
-                      ref={manualRefInputRef}
-                    />
-                  </label>
-                  <button type="submit" className="btn btn-warning w-full">
-                    Submit Manual Reference
-                  </button>
-                </form>
+                <ManualRefForm
+                  manualRef={manualRef}
+                  setManualRef={setManualRef}
+                  handleManualRefSubmit={handleManualRefSubmit}
+                  manualRefInputRef={manualRefInputRef}
+                />
               )}
+              <ImageUpload
+                showWebcam={showWebcam}
+                setShowWebcam={setShowWebcam}
+                webcamRef={webcamRef}
+                sessionId={sessionId}
+                trackingNumber={trackingNumber}
+                apiUrl={apiUrl}
+                setMessage={setMessage}
+              />
               <button
                 className="btn btn-secondary w-full mb-4"
                 onClick={async () => {
-                  // Send the current tracking number to backend to flush notes
                   if (trackingNumber) {
                     try {
                       await axios.post(`${apiUrl}/api/barcode`, {
@@ -414,11 +337,9 @@ function App() {
                         sessionId,
                       });
                     } catch (err) {
-                      // Optionally handle error
                       setMessage("Failed to finalize previous tracking batch.");
                     }
                   }
-                  // Now reset frontend state for new tracking
                   setDealFound(false);
                   setTrackingNumber("");
                   setSku("");

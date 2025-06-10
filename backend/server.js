@@ -204,7 +204,68 @@ app.post("/api/barcode", async (req, res) => {
           error: "No deal found for this session. Scan tracking number first.",
         });
       }
-      // Add SKU note and check spreadsheet
+
+      const machineKeywords = [
+        "AirSense 10",
+        "AirSense 11",
+        "AirCurve VAuto",
+        "AirCurve ASV",
+        "AirCurve ST",
+        "Trilogy Evo",
+        "AirMini AutoSet",
+        "Astral",
+        "Series 9 AutoSet",
+        "Series 9 CPAP",
+        "Series 9 BiPAP",
+        "Series 9 Elite",
+      ];
+      const isMachine = machineKeywords.some((keyword) =>
+        barcode.toLowerCase().includes(keyword.toLowerCase())
+      );
+
+      if (isMachine) {
+        // Get price for the machine
+        const machinePrice = await getPriceForName(barcode, qcFlaw);
+
+        // Add to Excel
+        appendMachineSpecific({
+          name: barcode,
+          upc: barcode,
+          serialNumber: serialNumber || "",
+          quantity: 1,
+          date: new Date(),
+        });
+
+        // Add to session noteContent and skuEntries
+        const machineNote = `Machine: ${barcode}${
+          serialNumber ? ` Serial Number: ${serialNumber}` : ""
+        }. Price: $${machinePrice}`;
+        if (!currentSession.noteContent) currentSession.noteContent = [];
+        currentSession.noteContent.push(machineNote);
+
+        if (!currentSession.skuEntries) currentSession.skuEntries = [];
+        currentSession.skuEntries.push({
+          description: barcode,
+          size: "",
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber || "",
+          price: machinePrice,
+          isMachine: true,
+        });
+
+        if (!currentSession.prices) currentSession.prices = [];
+        currentSession.prices.push(machinePrice);
+
+        await setSession(sessionId, currentSession);
+
+        return res.json({
+          spreadsheetMatch: null,
+          price: machinePrice,
+          message: "Machine added and note attached!",
+        });
+      }
+
+      // Only now do the UPC lookup for supplies
       const result = await matchSkuWithDatabase(barcode);
       if (!result.match) {
         return res.json({
@@ -214,6 +275,22 @@ app.post("/api/barcode", async (req, res) => {
         });
       }
 
+      const name =
+        result.row.Name || result.row.Description || result.row.Style || "";
+      const size = result.row.Size || "";
+      const upc = barcode;
+
+      // Supplies: increment quantity in the correct spreadsheet
+      incrementSupplyQuantity({
+        file: result.file, // "Inventory Supplies 2024.xlsx" or "Overstock supplies other companies.xlsx"
+        name,
+        upc,
+        size,
+        quantity: 1,
+        date: new Date(),
+      });
+
+      // Add SKU note and check spreadsheet
       let nameForPricing =
         (result.row &&
           (result.row.Name || result.row.Description || result.row.Style)) ||
@@ -247,50 +324,6 @@ app.post("/api/barcode", async (req, res) => {
       });
 
       // Only log machines (not supplies) - adjust this check as needed
-      const machineKeywords = [
-        "AirSense 10",
-        "AirSense 11",
-        "AirCurve VAuto",
-        "AirCurve ASV",
-        "AirCurve ST",
-        "Trilogy Evo",
-        "AirMini AutoSet",
-        "Astral",
-        "Series 9 AutoSet",
-        "Series 9 CPAP",
-        "Series 9 BiPAP",
-        "Series 9 Elite",
-      ];
-      const name =
-        result.row.Name || result.row.Description || result.row.Style || "";
-      const size = result.row.Size || "";
-      const upc = barcode;
-
-      // Only log machines (not supplies)
-      if (
-        machineKeywords.some((keyword) =>
-          (name || "").toLowerCase().includes(keyword.toLowerCase())
-        )
-      ) {
-        appendMachineSpecific({
-          name,
-          upc,
-          serialNumber: serialNumber || "",
-          quantity: 1,
-          date: new Date(),
-        });
-      } else {
-        // Supplies: increment quantity in the correct spreadsheet
-        // Use result.file to determine which spreadsheet to update
-        incrementSupplyQuantity({
-          file: result.file, // "Inventory Supplies 2024.xlsx" or "Overstock supplies other companies.xlsx"
-          name,
-          upc,
-          size,
-          quantity: 1,
-          date: new Date(),
-        });
-      }
 
       await setSession(sessionId, currentSession);
 
