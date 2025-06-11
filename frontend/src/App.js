@@ -13,13 +13,6 @@ function App() {
   const [dealFound, setDealFound] = useState(false);
   const [message, setMessage] = useState("");
   const [spreadsheetMatch, setSpreadsheetMatch] = useState(null);
-  const [excelData, setExcelData] = useState({
-    "Inventory Supplies 2024.xlsx": [],
-    "Overstock supplies other companies.xlsx": [],
-  });
-  const [selectedFile, setSelectedFile] = useState(
-    "Inventory Supplies 2024.xlsx"
-  );
   const [showManualRef, setShowManualRef] = useState(false);
   const [manualRef, setManualRef] = useState("");
   const [pendingSku, setPendingSku] = useState("");
@@ -35,6 +28,12 @@ function App() {
   const trackingInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
   const webcamRef = useRef(null);
+
+  // New MongoDB data states
+  const [inventoryData, setInventoryData] = useState([]);
+  const [overstockData, setOverstockData] = useState([]);
+  const [machineSpecificsData, setMachineSpecificsData] = useState([]);
+  const [selectedCollection, setSelectedCollection] = useState("inventory");
 
   const cpapMachines = [
     "AirSense 10",
@@ -55,27 +54,23 @@ function App() {
 
   const setSkuInputAndFocus = (el) => {
     skuInputRef.current = el;
-    if (el) el.focus();
+    if (el && !showManualRef) el.focus();
   };
 
+  // Fetch MongoDB data
   useEffect(() => {
-    const files = [
-      "Inventory Supplies 2024.xlsx",
-      "Overstock supplies other companies.xlsx",
-    ];
-    files.forEach(async (file) => {
-      try {
-        const res = await axios.get(
-          `${apiUrl}/api/excel/${encodeURIComponent(file)}`
-        );
-        setExcelData((prevData) => ({
-          ...prevData,
-          [file]: res.data.data,
-        }));
-      } catch (err) {
-        console.error(`Error loading ${file}:`, err);
-      }
-    });
+    axios
+      .get(`${apiUrl}/api/inventory`)
+      .then((res) => setInventoryData(res.data.data))
+      .catch(() => setInventoryData([]));
+    axios
+      .get(`${apiUrl}/api/overstock`)
+      .then((res) => setOverstockData(res.data.data))
+      .catch(() => setOverstockData([]));
+    axios
+      .get(`${apiUrl}/api/machine-specifics`)
+      .then((res) => setMachineSpecificsData(res.data.data))
+      .catch(() => setMachineSpecificsData([]));
   }, []);
 
   useEffect(() => {
@@ -221,7 +216,7 @@ function App() {
     setMessage("Checking manual reference...");
     setDescriptionResult("");
     let description = "";
-    const selectedRows = excelData[selectedFile];
+    const selectedRows = inventoryData;
     const matchedRow = selectedRows.find((row) =>
       Object.values(row).some(
         (val) => val && val.toString().toLowerCase() === manualRef.toLowerCase()
@@ -240,6 +235,9 @@ function App() {
         manualRef,
         sessionId,
         description,
+        price,
+        serialNumber,
+        qcFlaw,
       });
       setSpreadsheetMatch(retryRes.data.spreadsheetMatch);
       setMessage(
@@ -253,6 +251,9 @@ function App() {
       setManualRef("");
       setPendingSku("");
       setDescriptionResult(retryRes.data.descriptionResult);
+      if (skuInputRef.current) {
+        skuInputRef.current.focus();
+      }
     } catch (err) {
       setMessage(
         err.response?.data?.error || "Error checking manual reference."
@@ -260,7 +261,12 @@ function App() {
     }
   };
 
-  const fileOptions = Object.keys(excelData);
+  // Table data selection
+  let tableData = [];
+  if (selectedCollection === "inventory") tableData = inventoryData;
+  else if (selectedCollection === "overstock") tableData = overstockData;
+  else if (selectedCollection === "machineSpecifics")
+    tableData = machineSpecificsData;
 
   return (
     <div className="min-h-screen w-full bg-base-200 flex">
@@ -392,52 +398,54 @@ function App() {
         </div>
       </div>
       <div className="bg-base-100 rounded-xl shadow-lg p-6 w-[70%]">
-        <h2 className="text-2xl font-bold mb-4">Excel File Viewer</h2>
+        <h2 className="text-2xl font-bold mb-4">Data Viewer</h2>
         <div className="mb-4">
-          <label className="font-semibold mr-2">Select file:</label>
+          <label className="font-semibold mr-2">Select data:</label>
           <select
             className="select select-bordered"
-            value={selectedFile}
-            onChange={(e) => setSelectedFile(e.target.value)}
+            value={selectedCollection}
+            onChange={(e) => setSelectedCollection(e.target.value)}
           >
-            {fileOptions.map((file) => (
-              <option key={file} value={file}>
-                {file}
-              </option>
-            ))}
+            <option value="inventory">Inventory</option>
+            <option value="overstock">Overstock</option>
+            <option value="machineSpecifics">Machine Specifics</option>
           </select>
         </div>
         <div className="overflow-x-auto max-h-[70vh]">
           <table className="table table-xs border border-white border-solid">
             <thead>
               <tr>
-                {excelData[selectedFile][0] &&
-                  Object.keys(excelData[selectedFile][0]).map((col) => (
-                    <th
-                      key={col}
-                      className="border border-white border-solid bg-base-100 text-base-content"
-                    >
-                      {col}
-                    </th>
-                  ))}
+                {tableData[0] &&
+                  Object.keys(tableData[0])
+                    .filter((col) => col !== "_id" && col !== "__v")
+                    .map((col) => (
+                      <th
+                        key={col}
+                        className="border border-white border-solid bg-base-100 text-base-content"
+                      >
+                        {col}
+                      </th>
+                    ))}
               </tr>
             </thead>
             <tbody>
-              {excelData[selectedFile].map((row, i) => (
+              {tableData.map((row, i) => (
                 <tr key={i}>
-                  {Object.values(row).map((val, j) => (
-                    <td
-                      key={j}
-                      className="border border-white border-solid bg-base-100 text-base-content"
-                    >
-                      {val}
-                    </td>
-                  ))}
+                  {Object.entries(row)
+                    .filter(([key]) => key !== "_id" && key !== "__v")
+                    .map(([key, val], j) => (
+                      <td
+                        key={j}
+                        className="border border-white border-solid bg-base-100 text-base-content"
+                      >
+                        {val}
+                      </td>
+                    ))}
                 </tr>
               ))}
             </tbody>
           </table>
-          {excelData[selectedFile].length === 0 && (
+          {tableData.length === 0 && (
             <div className="text-gray-400 text-center mt-4">
               No data to display.
             </div>

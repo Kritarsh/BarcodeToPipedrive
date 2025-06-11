@@ -4,6 +4,9 @@ import stringSimilarity from "string-similarity";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import Inventory from "./models/Inventory.js";
+import Overstock from "./models/Overstock.js";
+import MachineSpecific from "./models/MachineSpecific.js";
 
 const UPC_API_KEY = process.env.UPC_API_KEY; // Set this in your .env
 
@@ -35,7 +38,7 @@ const priceRules = [
 export function getPriceForName(name, flaw) {
   let price = 0;
   if (!name) return price;
-  for (const rule of priceRules) {
+  for (const  rule of priceRules) {
     if (name.toLowerCase().includes(rule.keyword.toLowerCase())) {
       price += rule.price;
       if (
@@ -48,7 +51,7 @@ export function getPriceForName(name, flaw) {
           rule.keyword.toLowerCase().includes("Filters"))
       ) {
         price = 0;
-      } else if (flaw != "none") {
+      } else if (flaw != "none" ) {
         price = rule.price * 0.5;
       }
     }
@@ -56,40 +59,35 @@ export function getPriceForName(name, flaw) {
   return price;
 }
 export async function matchSkuWithDatabase(barcode) {
-  // 1. Check spreadsheets first
-  const spreadsheetFiles = [
-    { file: "Inventory Supplies 2024.xlsx", columns: ["UPC"] },
-    { file: "Overstock supplies other companies.xlsx", columns: ["UPC"] },
-  ];
+  // 1. Check MongoDB collections first
+  const inventoryMatch = await Inventory.findOne({ UPC: barcode });
+  if (inventoryMatch) {
+    console.log("Found exact match in Inventory collection");
+    return {
+      match: true,
+      collection: "Inventory",
+      row: inventoryMatch,
+      matchedColumn: "UPC",
+      score: 1,
+      brand: inventoryMatch.MFR || null,
+      model: inventoryMatch.Style || null,
+      foundInMongoDB: true,
+    };
+  }
 
-  for (const { file, columns } of spreadsheetFiles) {
-    const filePath = join(__dirname, file);
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet);
-
-    for (const row of data) {
-      for (const col of columns) {
-        const cellValue = row[col] && row[col].toString();
-        if (!cellValue) continue;
-
-        // Direct match with barcode
-        if (cellValue === barcode) {
-          console.log(`Found exact match in ${file} at column ${col}`);
-          return {
-            match: true,
-            file,
-            row,
-            matchedColumn: col,
-            score: 1,
-            brand: row["MFR"] || row["Brand"] || null,
-            model: row["Style"] || row["Model"] || null,
-            foundInSpreadsheet: true,
-          };
-        }
-      }
-    }
+  const overstockMatch = await Overstock.findOne({ UPC: barcode });
+  if (overstockMatch) {
+    console.log("Found exact match in Overstock collection");
+    return {
+      match: true,
+      collection: "Overstock",
+      row: overstockMatch,
+      matchedColumn: "UPC",
+      score: 1,
+      brand: overstockMatch.MFR || null,
+      model: overstockMatch.Style || null,
+      foundInMongoDB: true,
+    };
   }
 
   // 2. If not found, query UPCdatabase.org
@@ -118,271 +116,137 @@ export async function matchSkuWithDatabase(barcode) {
     };
   }
 
-  // 3. (Optional) Fuzzy match brand/model with spreadsheet as before...
+  // 3. (Optional) Fuzzy match brand/model with MongoDB as before...
   // ...existing fuzzy match logic...
 }
 
 export async function matchSkuWithDatabaseManual(barcode, manualRef) {
-  const spreadsheetFiles = [
-    { file: "Inventory Supplies 2024.xlsx", columns: ["Ref #"] },
-    { file: "Overstock supplies other companies.xlsx", columns: ["Ref #"] },
-  ];
-
-  for (const { file, columns } of spreadsheetFiles) {
-    const filePath = join(__dirname, file);
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet);
-    const headers = xlsx.utils.sheet_to_json(sheet, { header: 1 })[0];
-    console.log("Sheet names:", workbook.SheetNames);
-    console.log("Headers", headers);
-    try {
-      for (const row of data) {
-        for (const col of columns) {
-          const cellValue = row[col] && row[col].toString();
-          if (!cellValue) continue;
-          console.log("cellValue", cellValue);
-          const score = stringSimilarity.compareTwoStrings(
-            manualRef,
-            cellValue
-          );
-          if (score > 0.7) {
-            return {
-              match: true,
-              file,
-              row,
-              matchedColumn: col,
-              score,
-              manualRef,
-            };
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error reading spreadsheet:", error.message);
-      return { match: false, reason: "Spreadsheet read error" };
-    }
+  const inventoryMatch = await Inventory.findOne({ "RefNum": manualRef });
+  if (inventoryMatch) {
+    return {
+      match: true,
+      collection: "Inventory",
+      row: inventoryMatch,
+      matchedColumn: "RefNum",
+      score: 1,
+      manualRef,
+    };
   }
 
-  // Only return "not found" after all files have been checked
+  const overstockMatch = await Overstock.findOne({ "RefNum": manualRef });
+  if (overstockMatch) {
+    return {
+      match: true,
+      collection: "Overstock",
+      row: overstockMatch,
+      matchedColumn: "RefNum",
+      score: 1,
+      manualRef,
+    };
+  }
+
   return {
     match: false,
-    reason: "No fuzzy match found in sheets with manual reference",
+    reason: "No fuzzy match found in MongoDB collections with manual reference",
     manualRef,
   };
 }
 
 export async function returnProductDescription({
-  file,
+  collection,
   matchedColumn,
   rowValue,
   properValue,
   upc,
 }) {
-  const filePath = join(__dirname, file);
-  const workbook = xlsx.readFile(filePath);
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const data = xlsx.utils.sheet_to_json(sheet);
-  const relevantColumns = ["MFR", "Style", "Size"];
+  let model;
+  if (collection === "Inventory") {
+    model = Inventory;
+  } else if (collection === "Overstock") {
+    model = Overstock;
+  } else {
+    return "Invalid collection";
+  }
 
-  for (const row of data) {
-    if (
-      row[matchedColumn] &&
-      row[matchedColumn].toString() === properValue.toString()
-    ) {
-      // If the row matches, return the relevant columns
-      const descriptionParts = [];
-      for (const col of relevantColumns) {
-        if (row[col]) {
-          descriptionParts.push(row[col].toString());
-        }
-      }
-      const description = descriptionParts.join(" ").trim();
-      return {
-        upc,
-        description,
-        file,
-        matchedRow: row,
-      };
-    }
+  const row = await model.findOne({ [matchedColumn]: properValue });
+  if (row) {
+    const descriptionParts = [];
+    if (row.MFR) descriptionParts.push(row.MFR);
+    if (row.Style) descriptionParts.push(row.Style);
+    if (row.Size) descriptionParts.push(row.Size);
+    const description = descriptionParts.join(" ").trim();
+    return {
+      upc,
+      description,
+      collection,
+      matchedRow: row,
+    };
   }
 
   return "No matching row found";
 }
-export async function matchDescriptionWithDatabase(description) {
-  const spreadsheetFiles = [
-    { file: "Inventory Supplies 2024.xlsx", columns: ["MFR", "Style", "Size"] },
-    {
-      file: "Overstock supplies other companies.xlsx",
-      columns: ["MFR", "Style", "Size"],
-    },
-  ];
 
-  for (const { file, columns } of spreadsheetFiles) {
-    const filePath = join(__dirname, file);
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet);
-
-    for (const row of data) {
-      // Concatenate the two columns (with a space in between)
-      for (let i = 0; i < columns.length - 1; i++) {
-        if (!row[columns[i]] || !row[columns[i + 1]]) continue;
-
-        // Ensure both columns exist and are strings
-        const part1 = row[columns[i]] ? row[columns[i]].toString() : "";
-        const part2 = row[columns[i + 1]] ? row[columns[i + 1]].toString() : "";
-        const combined = `${part1} ${part2}`.trim();
-
-        if (!combined) continue;
-
-        // Fuzzy match description with the concatenated string
-        const score = stringSimilarity.compareTwoStrings(description, combined);
-        if (score > 0.7) {
-          return {
-            match: true,
-            file,
-            row,
-            matchedColumns: [columns[i], columns[i + 1]],
-            score,
-            combined,
-          };
-        }
-      }
-    }
-  }
-
-  return {
-    match: false,
-    reason: "No fuzzy match found in sheets",
-  };
-}
-
-export async function writeUPCToSpreadsheet({
-  file,
+export async function writeUPCToMongoDB({
+  collection,
   matchedColumn,
   rowValue,
   upc,
 }) {
-  console.log("About to join path", __dirname, file);
-  const filePath = join(__dirname, file);
-  console.log("File path:", filePath);
-  const workbook = xlsx.readFile(filePath);
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const data = xlsx.utils.sheet_to_json(sheet);
-
-  let updated = false;
-  for (let i = 0; i < data.length; i++) {
-    const row = data[i];
-    if (
-      row[matchedColumn] &&
-      row[matchedColumn].toString() === rowValue.toString()
-    ) {
-      data[i]["UPC"] = upc;
-      updated = true;
-      break;
-    }
+  let model;
+  if (collection === "Inventory") {
+    model = Inventory;
+  } else if (collection === "Overstock") {
+    model = Overstock;
+  } else {
+    return "Invalid collection";
   }
 
-  if (updated) {
-    // Convert updated data back to worksheet and save
-    const newSheet = xlsx.utils.json_to_sheet(data);
-    workbook.Sheets[sheetName] = newSheet;
-    xlsx.writeFile(workbook, filePath);
-  }
+  const result = await model.updateOne(
+    { [matchedColumn]: rowValue },
+    { $set: { UPC: upc } }
+  );
+  return result;
 }
-export function appendMachineSpecific({
+
+export async function appendMachineSpecific({
   name,
   upc,
   serialNumber,
   quantity = 1,
   date = new Date(),
 }) {
-  const filePath = join(__dirname, "machinespecifics.xlsx");
-  let workbook, worksheet, data;
-
-  try {
-    workbook = xlsx.readFile(filePath);
-    worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    data = xlsx.utils.sheet_to_json(worksheet);
-  } catch (err) {
-    // If file doesn't exist, create new
-    workbook = xlsx.utils.book_new();
-    data = [];
-  }
-
-  // Prepare new row
-  const newRow = {
-    Date: date.toISOString().split("T")[0],
-    Quantity: quantity,
+  const newMachine = new MachineSpecific({
     Name: name,
     UPC: upc,
-    "Serial Number": serialNumber,
-  };
-
-  data.push(newRow);
-
-  // Convert back to worksheet and save
-  const newSheet = xlsx.utils.json_to_sheet(data, {
-    header: ["Date", "Quantity", "Name", "UPC", "Serial Number"],
+    SerialNumber: serialNumber,
+    Quantity: quantity,
+    Date: date,
   });
-  workbook.SheetNames[0] = workbook.SheetNames[0] || "Sheet1";
-  workbook.Sheets[workbook.SheetNames[0]] = newSheet;
-  xlsx.writeFile(workbook, filePath);
+  await newMachine.save();
 }
-export function incrementSupplyQuantity({
-  file,
+
+export async function incrementSupplyQuantity({
+  collection,
   name,
   upc,
   size = "",
   quantity = 1,
   date = new Date(),
 }) {
-  const filePath = join(__dirname, file);
-  let workbook, worksheet, data;
-
-  try {
-    workbook = xlsx.readFile(filePath);
-    worksheet = workbook.Sheets[workbook.SheetNames[0]];
-    data = xlsx.utils.sheet_to_json(worksheet);
-  } catch (err) {
-    // If file doesn't exist, create new
-    workbook = xlsx.utils.book_new();
-    data = [];
-  }
-
-  // Try to find an existing row with the same Name, UPC, and Size
-  const existingRow = data.find(
-    (row) =>
-      row.Name === name && row.UPC === upc && (row.Size || "") === (size || "")
-  );
-
-  if (existingRow) {
-    // Increment the quantity
-    existingRow.Quantity = Number(existingRow.Quantity || 1) + quantity;
-    // Optionally, update the date to the latest
-    existingRow.Date = date.toISOString().split("T")[0];
+  let model;
+  if (collection === "Inventory") {
+    model = Inventory;
+  } else if (collection === "Overstock") {
+    model = Overstock;
   } else {
-    // Prepare new row
-    const newRow = {
-      Date: date.toISOString().split("T")[0],
-      Quantity: quantity,
-      Name: name,
-      UPC: upc,
-      Size: size,
-    };
-    data.push(newRow);
+    return "Invalid collection";
   }
 
-  // Convert back to worksheet and save
-  const newSheet = xlsx.utils.json_to_sheet(data, {
-    header: ["Date", "Quantity", "Name", "UPC", "Size"],
-  });
-  workbook.SheetNames[0] = workbook.SheetNames[0] || "Sheet1";
-  workbook.Sheets[workbook.SheetNames[0]] = newSheet;
-  xlsx.writeFile(workbook, filePath);
+  const query = upc ? { UPC: upc } : { Name: name, Size: size };
+  const result = await model.findOneAndUpdate(
+    query,
+    { $inc: { Quantity: quantity }, $set: { Date: date } },
+    { upsert: true, new: true }
+  );
+  return result;
 }

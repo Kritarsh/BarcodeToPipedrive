@@ -11,13 +11,18 @@ import { addNoteToPipedrive } from "./pipedrive.js";
 import {
   matchSkuWithDatabase,
   matchSkuWithDatabaseManual,
-  writeUPCToSpreadsheet,
-  matchDescriptionWithDatabase,
+  writeUPCToMongoDB,
   returnProductDescription,
   getPriceForName,
   appendMachineSpecific,
   incrementSupplyQuantity,
 } from "./skuMatcher.js";
+import FormData from "form-data";
+import fs from "fs";
+import mongoose from "mongoose";
+import Inventory from "./models/Inventory.js";
+import Overstock from "./models/Overstock.js";
+import MachineSpecific from "./models/MachineSpecific.js";
 
 dotenv.config();
 
@@ -43,6 +48,22 @@ const redisClient = createClient({
 redisClient.on("error", (err) => console.log("Redis Client Error", err));
 
 await redisClient.connect();
+
+// Connect to MongoDB
+mongoose
+  .connect(
+    "mongodb+srv://kritarshn:e73pqJ8RwJpUuiOo@cluster0.bvizlpw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0",
+    {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    }
+  )
+  .then(() => {
+    console.log("Connected to MongoDB");
+  })
+  .catch((err) => {
+    console.error("MongoDB connection error:", err);
+  });
 
 // --- Helper Functions ---
 async function getSession(sessionId) {
@@ -85,29 +106,35 @@ function qcFlawLabel(value) {
   }
 }
 
-// --- Routes ---
+async function uploadFileToPipedrive(filePath, dealId) {
+  const form = new FormData();
+  form.append("file", fs.createReadStream(filePath));
+  form.append("deal_id", dealId);
 
-// Excel file fetch
-app.get("/api/excel/:filename", (req, res) => {
-  const { filename } = req.params;
-  console.log("Fetching file:", filename);
-  const allowedFiles = [
-    "Inventory Supplies 2024.xlsx",
-    "Overstock supplies other companies.xlsx",
-  ];
-  if (!allowedFiles.includes(filename)) {
-    return res.status(400).json({ error: "File not allowed" });
-  }
-  const filePath = join(__dirname, filename);
-  try {
-    const workbook = xlsx.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-    res.json({ data });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to read file" });
-  }
-});
+  const response = await axios.post(
+    `${PIPEDRIVE_API_URL}/files?api_token=${PIPEDRIVE_API_TOKEN}`,
+    form,
+    { headers: form.getHeaders() }
+  );
+  return response.data.data.id; // Returns the file ID
+}
+
+async function addImageNoteToPipedrive(
+  dealId,
+  fileId,
+  noteContent = "Image attached"
+) {
+  await axios.post(
+    `${PIPEDRIVE_API_URL}/notes?api_token=${PIPEDRIVE_API_TOKEN}`,
+    {
+      content: noteContent,
+      deal_id: dealId,
+      file_id: fileId,
+    }
+  );
+}
+
+// --- Routes ---
 
 // Barcode scan handler
 app.post("/api/barcode", async (req, res) => {
@@ -282,7 +309,7 @@ app.post("/api/barcode", async (req, res) => {
 
       // Supplies: increment quantity in the correct spreadsheet
       incrementSupplyQuantity({
-        file: result.file, // "Inventory Supplies 2024.xlsx" or "Overstock supplies other companies.xlsx"
+        collection: result.collection,
         name,
         upc,
         size,
@@ -330,7 +357,7 @@ app.post("/api/barcode", async (req, res) => {
       return res.json({
         note: result,
         noteContent: currentSession.noteContent,
-        spreadsheetMatch: result.file,
+        spreadsheetMatch: result.collection,
         price: calculatedPrice,
       });
     }
@@ -342,6 +369,7 @@ app.post("/api/barcode", async (req, res) => {
 
 // Manual reference and description fallback
 app.post("/api/barcode/manual", async (req, res) => {
+  console.log("Manual barcode scan request:", req.body);
   const {
     barcode,
     manualRef,
@@ -357,6 +385,7 @@ app.post("/api/barcode/manual", async (req, res) => {
       .json({ error: "barcode, manualRef, and sessionId are required" });
   }
 
+  const currentSession = await getSession(sessionId);
   const matchResult = await matchSkuWithDatabaseManual(barcode, manualRef);
 
   if (matchResult.match) {
@@ -365,12 +394,10 @@ app.post("/api/barcode/manual", async (req, res) => {
         (matchResult.row.Name ||
           matchResult.row.Description ||
           matchResult.row.Style)) ||
-      (descriptionResult && descriptionResult.description) ||
       "";
     let calculatedPrice = 0;
-    calculatedPrice = await getPriceForName(nameForPricing, req.body.qcFlaw);
+    calculatedPrice = await getPriceForName(nameForPricing, qcFlaw);
 
-    // FIX: define noteContent with const or let
     const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
       matchResult.file
     } - ${
@@ -382,26 +409,41 @@ app.post("/api/barcode/manual", async (req, res) => {
       ""
     }${matchResult.row.Size ? " Size: " + matchResult.row.Size : ""}${
       qcFlaw && qcFlaw !== "none" ? ` [Flaw: ${qcFlawLabel(qcFlaw)}]` : ""
-    }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`; // <-- Add this line
-    if (!session[sessionId]) session[sessionId] = { noteContent: [] };
-    if (!session[sessionId].noteContent) session[sessionId].noteContent = [];
-    session[sessionId].noteContent.push(noteContent);
+    }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`;
 
-    // After pushing noteContent
-    if (!session[sessionId].prices) session[sessionId].prices = [];
-    session[sessionId].prices.push(calculatedPrice);
+    if (!currentSession.noteContent) currentSession.noteContent = [];
+    currentSession.noteContent.push(noteContent);
+
+    if (!currentSession.prices) currentSession.prices = [];
+    currentSession.prices.push(calculatedPrice);
+
+    // Optionally add to skuEntries as well
+    if (!currentSession.skuEntries) currentSession.skuEntries = [];
+    currentSession.skuEntries.push({
+      description:
+        matchResult.row.Description ||
+        matchResult.row.Name ||
+        matchResult.row.Style ||
+        "",
+      size: matchResult.row.Size || "",
+      qcFlaw: qcFlaw,
+      serialNumber: serialNumber || "",
+      price: calculatedPrice,
+    });
+
+    await setSession(sessionId, currentSession);
 
     let descriptionResult;
     try {
       descriptionResult = await returnProductDescription({
-        file: matchResult.file,
+        collection: matchResult.collection,
         matchedColumn: matchResult.matchedColumn,
         rowValue: matchResult.row,
         properValue: matchResult.row[matchResult.matchedColumn],
         upc: barcode,
       });
-      await writeUPCToSpreadsheet({
-        file: matchResult.file,
+      await writeUPCToMongoDB({
+        collection: matchResult.collection,
         matchedColumn: matchResult.matchedColumn,
         rowValue: matchResult.row[matchResult.matchedColumn],
         upc: barcode,
@@ -422,26 +464,6 @@ app.post("/api/barcode/manual", async (req, res) => {
   }
 
   // Fallback: Try matching by description if provided
-  let descMatch = null;
-  if (description) {
-    descMatch = await matchDescriptionWithDatabase(description);
-  }
-  if (descMatch && descMatch.match) {
-    return res.json({
-      match: true,
-      message: "SKU not found by manual reference, but found by description.",
-      spreadsheetMatch: descMatch.file,
-      descriptionMatch: true,
-      row: descMatch.row,
-      score: descMatch.score,
-    });
-  }
-  return res.json({
-    match: false,
-    message: "SKU not found, look based on the description now.",
-    reason: matchResult.reason,
-    spreadsheetMatch: null,
-  });
 });
 
 // Image upload handler
@@ -449,14 +471,58 @@ const upload = multer({ dest: "uploads/" }); // or configure as needed
 
 app.post("/api/upload-image", upload.single("image"), async (req, res) => {
   try {
-    // req.file contains the uploaded file
-    // req.body.sessionId and req.body.trackingNumber are available if sent as form fields
-    // You can move the file, process it, or attach it to a deal as needed
+    const { sessionId } = req.body;
+    if (!sessionId)
+      return res.status(400).json({ error: "sessionId required" });
 
-    // Example: respond with file info
-    res.json({ message: "Image uploaded!", file: req.file });
+    const currentSession = await getSession(sessionId);
+    const dealId = currentSession?.dealId;
+    if (!dealId)
+      return res.status(400).json({ error: "No deal found for this session." });
+
+    // 1. Upload file to Pipedrive
+    const fileId = await uploadFileToPipedrive(req.file.path, dealId);
+
+    // 2. Add note with image attached
+    await addImageNoteToPipedrive(dealId, fileId, "Photo attached");
+
+    res.json({
+      message: "Image uploaded and attached as note!",
+      file: req.file,
+    });
   } catch (err) {
-    res.status(500).json({ error: "Failed to upload image" });
+    console.error(err);
+    res.status(500).json({ error: "Failed to upload and attach image" });
+  }
+});
+
+// New endpoint to fetch inventory data from MongoDB
+app.get("/api/inventory", async (req, res) => {
+  try {
+    const inventoryData = await Inventory.find();
+    res.json({ data: inventoryData });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch inventory data" });
+  }
+});
+
+// New endpoint to fetch overstock data from MongoDB
+app.get("/api/overstock", async (req, res) => {
+  try {
+    const overstockData = await Overstock.find();
+    res.json({ data: overstockData });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch overstock data" });
+  }
+});
+
+// New endpoint to fetch machine specifics data from MongoDB
+app.get("/api/machine-specifics", async (req, res) => {
+  try {
+    const machineSpecificsData = await MachineSpecific.find();
+    res.json({ data: machineSpecificsData });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch machine specifics data" });
   }
 });
 
