@@ -3,7 +3,7 @@
 \graphicspath{{C:/Users/krita/Pictures/Screenshots/}}
 \usetheme{Boadilla} % You can change the theme to your preference
 
-\title{Barcoding}
+\title{Bidbar}
 \author{Kritarsh Negi}
 \institute{The CPAP Box}
 \date{\today}
@@ -22,22 +22,30 @@
 \section{Major Actions}
 \begin{frame}{Actions Taken}
     \begin{itemize}
-        \item Deployed the website to Render: \url{https://frontend-e2jk.onrender.com/}
-        \item Added more Quality Control features
-        \begin{itemize}
-            \item Updated the flaw-no flaw dropdown with a specific checklist item for each flaw
-            \item Added the cursor auto focus on the relevant input field depending on the workflow
-        \end{itemize}
-        \item Fixed the pricing bug and had it so that a broken CPAP machine is half off while broken supplies are zero dollars
-        \item Added Auto Clear functionality after UPCs are added
+        \item Fixed the manual matching feature
+        \item Added the ability to add items to the the database
+        \item Continued working on the website, implementing login and authorization
     \end{itemize}
 \end{frame}
 \begin{frame}{Things to work on }
     \begin{itemize}
-        \item Format the notes better so that they are easier to read
         \item Testing
-        \item Uploading images to Pipedrive via their API
-        \item Adding the Serial Number matching functionality
+        \item Implementing the bidding process on the website
+        \begin{itemize}
+            \item User Portal:
+            \begin{itemize}
+                \item Browse/Search for items from the database
+                \item Select multiple items and enter the total bid amount
+                \item View Bid Status
+            \end{itemize}
+            \item Admin Portal:
+            \begin{itemize}
+                \item View incoming bids
+                \item Accept/Reject bids
+                \item Send out SMS/Email notifications on bid status changes
+            \end{itemize}
+        \end{itemize}
+        \item Have a system to contact the site administrator with each bid offer
     \end{itemize}
 \end{frame}
 \begin{frame}{Tools Used}
@@ -46,6 +54,11 @@
         \item Pipedrive API
         \item UPCDatabase API
         \item Render
+        \item MongoDB
+        \item WooCommerce
+        \item Wordpress
+        \item NextJS
+        \item Oauth
         \item Redis
         \item ReactJS
         \item ExpressJS
@@ -54,7 +67,7 @@
 \section{Changes of Scope}
 \begin{frame}{Changes of Scope}
     \begin{itemize}
-        \item The scope of the project has changed because I need to add the serial number tracking capability to the project and potentially connect it to AssetPanda 
+        \item  I got more clarity on the requirements of the website, which led me to ditch woocommerce/wordpress/shopify in favor of a custom solution using NextJS and ExpressJS
     \end{itemize}
 \end{frame}
 \section{Measures}
@@ -62,63 +75,42 @@
     \begin{itemize}
         \item Percent of SKUs that have UPCs 
         \item Sales Cycle Time: This year, we've taken 24 hours on average between received and Ready to be paid, which in the future could be reduced to under 8 hours (within one workday) 
-        \includegraphics[width = \linewidth]{salescycle.png}
     \end{itemize}
+    \includegraphics[width = \linewidth]{salescycle.png}
+
 \end{frame}
 \begin{frame}{Measures}
     \begin{itemize}
-        \item Number of SKUs that have been added to the system
-        \item Number of SKUs that have been sold
-        \item Number of SKUs that have been scanned
-        \item Number of SKUs that have been matched to a Pipedrive deal
-        \item Number of SKUs that have been matched to a Pipedrive deal and have an image uploaded
+        \item Order Quantity and Profit
     \end{itemize}
-    \includegraphics[width = \linewidth]{deals.png}
 
 \end{frame}
 \section{Road Blocks}
 \begin{frame}{Road Blocks}
     \begin{itemize}
-        \item Writing to a new Spreadsheet with each scan of a CPAP machine
-        \item Connecting the Images to Pipedrive
-        \begin{itemize}
-            \item There may be problems with holding the images in my website because it would go over the data limits, so I'd either have to find a workaround or ditch the idea depending on how much space they are taking
-        \end{itemize}
+        \item having the inventory display on the website and having the changes reflected in the database
     \end{itemize}
 \end{frame}
-\begin{frame}{Road Blocks}
+\begin{frame}{Road Blocks}  
     \includegraphics[width = \linewidth]{manualprompt.png}
 \end{frame}
 \begin{frame}{Road Blocks}
-    \includegraphics[height=.8\textheight]{imagetest.png}
+    \includegraphics[width = 0.8\linewidth]{manualmatch123.png}
 \end{frame}
 \begin{frame}{Road Blocks}
-    \includegraphics[width = \linewidth]{automatch.png}
+    \includegraphics[width = \linewidth]{homepage.png}
 \end{frame}
 \begin{frame}{Road Blocks}
-    \includegraphics[width = \linewidth]{pipedrive.png}
-\end{frame} 
+    \includegraphics[width = \linewidth]{login.png}
+\end{frame}
+\begin{frame}{Road Blocks}
+    \includegraphics[width = \linewidth]{register.png}
+\end{frame}
 \section{Are we on time?}
 \begin{frame}{Are we on time?}
     \begin{itemize}
         \item Yes
-        \begin{itemize}
-            \item A rapid prototype of the project is done and now I need to test to work out the bugs and add functionality for flaw detection
-            \item Work on Inventory management 
-            \begin{itemize}
-                \item Work at finding a solution to the discrepancy between the inventory in Magento and the subscription model inventory
-            \end{itemize}
-            \item Work on the SellMyCpap website
-            \begin{itemize}
-                \item dynamic pricing
-            \end{itemize}
-        \end{itemize}
     \end{itemize}
-
-
-
-
-
 \end{frame}
 
 % Thank You Slide

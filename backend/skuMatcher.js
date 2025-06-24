@@ -16,8 +16,8 @@ const priceRules = [
   { keyword: "Mask", price: 10 },
   { keyword: "Cushion", price: 3 },
   { keyword: "Water Chamber", price: 5 },
-  { keyword: "Heated Tubing", price: 5 },
-  { keyword: "Standard Tubing", price: 0.5 },
+  { keyword: "Heated", price: 5 },
+  { keyword: "Standard", price: 0.5 },
   { keyword: "Filters", price: 0 },
   { keyword: "AirSense 10", price: 25 },
   { keyword: "AirSense 11", price: 100 },
@@ -33,6 +33,17 @@ const priceRules = [
   { keyword: "Series 9 Elite", price: 5 },
   { keyword: "CoughAssist T70", price: 250 },
   { keyword: "Oxygen Concentrator", price: 50 },
+  {keyword: "FFM", price: 10},
+  {keyword: "Leak", price: 10},
+  {keyword: "Climatelinear", price: 5},
+  {keyword: "STPK", price: 10},
+  {keyword: "fitpack", price: 10},
+  {keyword: "Frame", price: 10},
+  {keyword: "Pillows", price: 3},
+  {keyword: "Pillow", price: 3},
+
+
+
 ];
 
 export function getPriceForName(name, flaw) {
@@ -43,17 +54,28 @@ export function getPriceForName(name, flaw) {
       price += rule.price;
       if (
         flaw != "none" &&
-        (rule.keyword.toLowerCase().includes("mask") ||
-          rule.keyword.toLowerCase().includes("Cushion") ||
-          rule.keyword.toLowerCase().includes("Water Chamber") ||
-          rule.keyword.toLowerCase().includes("Heated Tubing") ||
-          rule.keyword.toLowerCase().includes("Standard Tubing") ||
-          rule.keyword.toLowerCase().includes("Filters"))
+        (
+          rule.keyword.toLowerCase().includes("mask") ||
+          rule.keyword.toLowerCase().includes("cushion") ||
+          rule.keyword.toLowerCase().includes("water chamber") ||
+          rule.keyword.toLowerCase().includes("heated") ||
+          rule.keyword.toLowerCase().includes("standard") ||
+          rule.keyword.toLowerCase().includes("filters") ||
+          rule.keyword.toLowerCase().includes("ffm") ||
+          rule.keyword.toLowerCase().includes("leak") ||
+          rule.keyword.toLowerCase().includes("climatelinear") ||
+          rule.keyword.toLowerCase().includes("stpk") ||
+          rule.keyword.toLowerCase().includes("fitpack") ||
+          rule.keyword.toLowerCase().includes("frame") ||
+          rule.keyword.toLowerCase().includes("pillows") ||
+          rule.keyword.toLowerCase().includes("pillow")
+        )
       ) {
         price = 0;
-      } else if (flaw != "none" ) {
+      } else if (flaw != "none") {
         price = rule.price * 0.5;
       }
+      return price;
     }
   }
   return price;

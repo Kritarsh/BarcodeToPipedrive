@@ -6,7 +6,6 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import cors from "cors";
 import { createClient } from "redis";
-import multer from "multer";
 import { addNoteToPipedrive } from "./pipedrive.js";
 import {
   matchSkuWithDatabase,
@@ -17,8 +16,6 @@ import {
   appendMachineSpecific,
   incrementSupplyQuantity,
 } from "./skuMatcher.js";
-import FormData from "form-data";
-import fs from "fs";
 import mongoose from "mongoose";
 import Inventory from "./models/Inventory.js";
 import Overstock from "./models/Overstock.js";
@@ -102,36 +99,7 @@ function qcFlawLabel(value) {
     case "none":
       return "No Flaw";
     default:
-      return value;
-  }
-}
-
-async function uploadFileToPipedrive(filePath, dealId) {
-  const form = new FormData();
-  form.append("file", fs.createReadStream(filePath));
-  form.append("deal_id", dealId);
-
-  const response = await axios.post(
-    `${PIPEDRIVE_API_URL}/files?api_token=${PIPEDRIVE_API_TOKEN}`,
-    form,
-    { headers: form.getHeaders() }
-  );
-  return response.data.data.id; // Returns the file ID
-}
-
-async function addImageNoteToPipedrive(
-  dealId,
-  fileId,
-  noteContent = "Image attached"
-) {
-  await axios.post(
-    `${PIPEDRIVE_API_URL}/notes?api_token=${PIPEDRIVE_API_TOKEN}`,
-    {
-      content: noteContent,
-      deal_id: dealId,
-      file_id: fileId,
-    }
-  );
+      return value;  }
 }
 
 // --- Routes ---
@@ -155,40 +123,35 @@ app.post("/api/barcode", async (req, res) => {
         oldSession.skuEntries.length > 0 &&
         oldSession.dealId
       ) {
-        // Group non-flawed
-        const nonFlawed = {};
-        // Group flawed by description
-        const flawed = {};
+        // Group items by description, size, flaw, and serialNumber (if present)
+        const grouped = {};
 
         for (const entry of oldSession.skuEntries) {
-          const desc = `${entry.description}${
-            entry.size ? " Size: " + entry.size : ""
-          }`;
-          if (!entry.qcFlaw || entry.qcFlaw === "none") {
-            nonFlawed[desc] = (nonFlawed[desc] || 0) + 1;
-          } else {
-            if (!flawed[desc]) flawed[desc] = [];
-            flawed[desc].push(entry);
+          // Key includes description, size, flaw, and serialNumber if present
+          const key = [
+            entry.description,
+            entry.size,
+            entry.qcFlaw,
+            entry.serialNumber || "",
+          ].join("|");
+
+          if (!grouped[key]) {
+            grouped[key] = { ...entry, count: 0, subtotal: 0 };
           }
+          grouped[key].count += 1;
+          grouped[key].subtotal += Number(entry.price) || 0;
         }
 
-        // Build summary strings
-        const nonFlawedSummary = Object.entries(nonFlawed)
-          .map(([desc, count]) => `${count} × ${desc}`)
-          .join("\n");
-
-        const flawedSummary = Object.entries(flawed)
-          .map(([desc, entries]) =>
-            entries
-              .map(
-                (entry) =>
-                  `Flawed: ${desc} [Flaw: ${qcFlawLabel(entry.qcFlaw)}]${
-                    entry.serialNumber ? ` Serial: ${entry.serialNumber}` : ""
-                  }`
-              )
-              .join("\n")
-          )
-          .join("\n");
+        // Build summary strings with subtotals
+        const lines = Object.values(grouped).map((item) => {
+          let line = `${item.count} × ${item.description}`;
+          if (item.size) line += ` Size: ${item.size}`;
+          if (item.qcFlaw && item.qcFlaw !== "none")
+            line += ` [Flaw: ${qcFlawLabel(item.qcFlaw)}]`;
+          if (item.serialNumber) line += ` Serial: ${item.serialNumber}`;
+          line += ` — Subtotal: $${item.subtotal.toFixed(2)}`;
+          return line;
+        });
 
         const total =
           oldSession.skuEntries.reduce(
@@ -197,8 +160,7 @@ app.post("/api/barcode", async (req, res) => {
           ) || 0;
 
         const allNotesWithTotal = [
-          nonFlawedSummary,
-          flawedSummary,
+          ...lines,
           `Total Price: $${total.toFixed(2)}`,
         ]
           .filter(Boolean)
@@ -302,8 +264,7 @@ app.post("/api/barcode", async (req, res) => {
         });
       }
 
-      const name =
-        result.row.Name || result.row.Description || result.row.Style || "";
+      const name = result.row.Name || result.row.Description || result.row.Style || "";
       const size = result.row.Size || "";
       const upc = barcode;
 
@@ -317,22 +278,15 @@ app.post("/api/barcode", async (req, res) => {
         date: new Date(),
       });
 
-      // Add SKU note and check spreadsheet
-      let nameForPricing =
-        (result.row &&
-          (result.row.Name || result.row.Description || result.row.Style)) ||
-        (result.descriptionResult && result.descriptionResult.description) ||
-        "";
-
       let calculatedPrice = 0;
-      calculatedPrice = await getPriceForName(nameForPricing, req.body.qcFlaw);
-      const noteContent = `Price: $${calculatedPrice}. Description: ${
+      calculatedPrice = await getPriceForName(name, qcFlaw);
+
+      const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
+        result.collection
+      } - ${name}. Price: $${calculatedPrice}. Description: ${
         result.row.Description || result.row.Name || result.row.Style || ""
-      }${result.row.Size ? " Size: " + result.row.Size : ""}${
-        req.body.qcFlaw && req.body.qcFlaw !== "none"
-          ? ` [Flaw: ${qcFlawLabel(req.body.qcFlaw)}]`
-          : ""
-      }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`; // <-- Add this line
+      }`;
+
       if (!currentSession.noteContent) currentSession.noteContent = [];
       currentSession.noteContent.push(noteContent);
 
@@ -342,23 +296,45 @@ app.post("/api/barcode", async (req, res) => {
       // When adding a SKU scan to the session:
       if (!currentSession.skuEntries) currentSession.skuEntries = [];
       currentSession.skuEntries.push({
-        description:
-          result.row.Description || result.row.Name || result.row.Style || "",
+        description: result.row.Description || result.row.Name || result.row.Style || "",
         size: result.row.Size || "",
         qcFlaw: req.body.qcFlaw,
         serialNumber: serialNumber || "",
         price: calculatedPrice,
+        collection: result.collection, // Add this for undo functionality
+        upc: barcode, // Add this for undo functionality
       });
 
-      // Only log machines (not supplies) - adjust this check as needed
-
       await setSession(sessionId, currentSession);
+
+      // ADD THIS BLOCK - Get description result like in manual case
+      let descriptionResult;
+      try {
+        descriptionResult = await returnProductDescription({
+          collection: result.collection,
+          matchedColumn: result.matchedColumn,
+          rowValue: result.row,
+          properValue: result.row[result.matchedColumn],
+          upc: barcode,
+        });
+        await writeUPCToMongoDB({
+          collection: result.collection,
+          matchedColumn: result.matchedColumn,
+          rowValue: result.row[result.matchedColumn],
+          upc: barcode,
+        });
+      } catch (error) {
+        console.error("Error writing to spreadsheet or adding note:", error);
+        // Don't return error here, just log it
+      }
 
       return res.json({
         note: result,
         noteContent: currentSession.noteContent,
         spreadsheetMatch: result.collection,
         price: calculatedPrice,
+        descriptionResult: descriptionResult || {}, // ADD THIS LINE
+        row: result.row, // ADD THIS LINE for frontend access
       });
     }
   } catch (error) {
@@ -458,42 +434,18 @@ app.post("/api/barcode/manual", async (req, res) => {
     return res.json({
       match: true,
       message: "SKU found and note added!",
-      spreadsheetMatch: matchResult.file,
-      descriptionResult: descriptionResult,
+      spreadsheetMatch: !!matchResult.collection,
+      price: calculatedPrice,
+      descriptionResult: descriptionResult || {},
+      noteContent: currentSession.noteContent,
     });
   }
 
-  // Fallback: Try matching by description if provided
-});
-
-// Image upload handler
-const upload = multer({ dest: "uploads/" }); // or configure as needed
-
-app.post("/api/upload-image", upload.single("image"), async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    if (!sessionId)
-      return res.status(400).json({ error: "sessionId required" });
-
-    const currentSession = await getSession(sessionId);
-    const dealId = currentSession?.dealId;
-    if (!dealId)
-      return res.status(400).json({ error: "No deal found for this session." });
-
-    // 1. Upload file to Pipedrive
-    const fileId = await uploadFileToPipedrive(req.file.path, dealId);
-
-    // 2. Add note with image attached
-    await addImageNoteToPipedrive(dealId, fileId, "Photo attached");
-
-    res.json({
-      message: "Image uploaded and attached as note!",
-      file: req.file,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to upload and attach image" });
-  }
+  // If no match, return a response so frontend can prompt for new product
+  return res.status(404).json({
+    match: false,
+    message: "SKU not found even with the manual reference.",
+  });
 });
 
 // New endpoint to fetch inventory data from MongoDB
@@ -523,6 +475,114 @@ app.get("/api/machine-specifics", async (req, res) => {
     res.json({ data: machineSpecificsData });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch machine specifics data" });
+  }
+});
+
+// New endpoint to add a product manually
+app.post("/api/product/new", async (req, res) => {
+  const {
+    barcode,
+    description,
+    size,
+    price,
+    qcFlaw,
+    manualRef,
+    sessionId,
+    serialNumber,
+  } = req.body;
+  if (!barcode || !description || !sessionId) {
+    return res
+      .status(400)
+      .json({ error: "barcode, description, and sessionId are required" });
+  }
+
+  try {
+    // Add to MongoDB Inventory
+    const newProduct = new Overstock({
+      RefNum: manualRef || "", // <-- set RefNum here
+      UPC: barcode,
+      Style: description,
+      Size: size || "",
+      Price: price || 0,
+      qcFlaw: qcFlaw || "none",
+      Date: new Date(),
+      Quantity: 0,
+    });
+    await newProduct.save();
+
+    // Optionally update session
+    const currentSession = await getSession(sessionId);
+    if (!currentSession.skuEntries) currentSession.skuEntries = [];
+    currentSession.skuEntries.push({
+      description,
+      size: size || "",
+      qcFlaw: qcFlaw || "none",
+      serialNumber: serialNumber || "",
+      price: price || 0,
+      isManual: true,
+    });
+    await setSession(sessionId, currentSession);
+
+    return res.json({ message: "Product added!", product: newProduct });
+  } catch (err) {
+    console.error("Error adding new product:", err);
+    return res.status(500).json({ error: "Failed to add new product" });
+  }
+});
+
+// Add undo endpoint
+app.post("/api/barcode/undo", async (req, res) => {
+  const { sessionId } = req.body;
+  
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
+  try {
+    const currentSession = await getSession(sessionId);
+    
+    if (!currentSession || !currentSession.skuEntries || currentSession.skuEntries.length === 0) {
+      return res.status(400).json({ error: "No items to undo" });
+    }
+
+    // Get the last entry to undo
+    const lastEntry = currentSession.skuEntries.pop();
+    
+    // Remove the last note content if it exists
+    if (currentSession.noteContent && currentSession.noteContent.length > 0) {
+      currentSession.noteContent.pop();
+    }
+    
+    // Remove the last price if it exists
+    if (currentSession.prices && currentSession.prices.length > 0) {
+      currentSession.prices.pop();
+    }
+
+    // If it was a machine, remove from MachineSpecific collection
+    if (lastEntry.isMachine) {
+      await MachineSpecific.deleteOne({
+        Name: lastEntry.description,
+        SerialNumber: lastEntry.serialNumber || ""
+      });
+    } else {
+      // If it was a supply, decrement the quantity
+      // Note: You may need to implement decrementSupplyQuantity function
+      // For now, we'll just log it
+      console.log(`Should decrement quantity for: ${lastEntry.description}`);
+    }
+
+    // Save the updated session
+    await setSession(sessionId, currentSession);
+
+    return res.json({
+      message: "Last scan undone successfully",
+      undoneItem: lastEntry,
+      remainingItems: currentSession.skuEntries.length
+    });
+
+  } catch (error) {
+    console.error("Error undoing last scan:", error);
+    return res.status(500).json({ error: "Failed to undo last scan" });
   }
 });
 

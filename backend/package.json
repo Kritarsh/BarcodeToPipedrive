@@ -23,5 +23,8 @@
     "redis": "^5.1.1",
     "string-similarity": "^1.0.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.3"
   }
 }

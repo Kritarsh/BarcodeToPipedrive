@@ -3,7 +3,6 @@ import axios from "axios";
 import TrackingForm from "./TrackingForm";
 import SkuForm from "./SkuForm";
 import ManualRefForm from "./ManualRefForm";
-import ImageUpload from "./ImageUpload";
 const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
@@ -20,14 +19,19 @@ function App() {
   const [qcFlaw, setQcFlaw] = useState("none");
   const [price, setPrice] = useState(null);
   const [totalPrice, setTotalPrice] = useState(0);
-  const [requireSerial, setRequireSerial] = useState(false);
-  const [serialNumber, setSerialNumber] = useState("");
-  const [showWebcam, setShowWebcam] = useState(false);
+  const [requireSerial, setRequireSerial] = useState(false);  const [serialNumber, setSerialNumber] = useState("");
   const [selectedMachine, setSelectedMachine] = useState("");
-  const skuInputRef = useRef(null);
+  const [showNewProductForm, setShowNewProductForm] = useState(false);
+  const [newProduct, setNewProduct] = useState({
+    barcode: "",
+    description: "",
+    size: "",
+    price: "",
+    qcFlaw: "none",
+    manualRef: "", // <-- change from serialNumber to manualRef
+  });  const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
-  const webcamRef = useRef(null);
 
   // New MongoDB data states
   const [inventoryData, setInventoryData] = useState([]);
@@ -157,6 +161,7 @@ function App() {
         }
         setSelectedMachine("");
         setSku("");
+        setQcFlaw("none"); // <-- Add this line
         return;
       }
 
@@ -180,8 +185,11 @@ function App() {
       setMessage(
         res.data.spreadsheetMatch
           ? "SKU found and note added!"
-          : "SKU not found, note added."
+          : "SKU not found"
       );
+
+      // ADD THIS LINE - Set description result for display
+      setDescriptionResult(res.data.descriptionResult || "");
 
       if (
         cpapMachines.some((keyword) =>
@@ -199,6 +207,12 @@ function App() {
       if (!res.data.spreadsheetMatch) {
         setShowManualRef(true);
         setPendingSku(sku);
+        // Focus on manual reference input after a short delay to ensure DOM is updated
+        setTimeout(() => {
+          if (manualRefInputRef.current) {
+            manualRefInputRef.current.focus();
+          }
+        }, 0);
       }
       setSku("");
       setPrice(res.data.price);
@@ -251,13 +265,86 @@ function App() {
       setManualRef("");
       setPendingSku("");
       setDescriptionResult(retryRes.data.descriptionResult);
-      if (skuInputRef.current) {
-        skuInputRef.current.focus();
+      setPrice(retryRes.data.price);
+      if (qcFlaw !== "flaw" && !isNaN(retryRes.data.price)) {
+        setTotalPrice((prev) => prev + retryRes.data.price);
       }
+      setQcFlaw("none"); // <-- Add this line
+      setTimeout(() => {
+        if (skuInputRef.current) {
+          skuInputRef.current.focus();
+        }
+      }, 0);
     } catch (err) {
       setMessage(
         err.response?.data?.error || "Error checking manual reference."
       );
+      setShowNewProductForm(true);
+      setNewProduct({
+        ...newProduct,
+        barcode: pendingSku,
+        serialNumber,
+        qcFlaw,
+      });
+    }
+  };
+
+  const handleNewProductSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.post(`${apiUrl}/api/product/new`, {
+        ...newProduct,
+        sessionId,
+      });
+      setMessage("Product added!");
+      setShowNewProductForm(false);
+      setPrice(Number(newProduct.price));
+      setTotalPrice((prev) => prev + Number(newProduct.price));
+      setNewProduct({
+        barcode: "",
+        description: "",
+        size: "",
+        price: "",
+        qcFlaw: "none",
+        manualRef: "", // <-- change from serialNumber to manualRef
+      });
+      setQcFlaw("none"); // <-- Add this line
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to add new product.");
+    }
+  };
+
+  // Add undo function
+  const handleUndo = async () => {
+    if (!dealFound) {
+      setMessage("No active session to undo from");
+      return;
+    }
+
+    try {
+      setMessage("Undoing last scan...");
+      const res = await axios.post(`${apiUrl}/api/barcode/undo`, {
+        sessionId
+      });
+      
+      // Update the total price by subtracting the undone item's price
+      const undonePriceValue = Number(res.data.undoneItem.price) || 0;
+      if (res.data.undoneItem.qcFlaw !== "flaw") {
+        setTotalPrice(prev => Math.max(0, prev - undonePriceValue));
+      }
+      
+      setMessage(`Undone: ${res.data.undoneItem.description} (${res.data.remainingItems} items remaining)`);
+      
+      // Clear any current form state
+      setSku("");
+      setShowManualRef(false);
+      setManualRef("");
+      setPendingSku("");
+      setPrice(null);
+      setDescriptionResult("");
+      
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to undo last scan");
     }
   };
 
@@ -314,24 +401,22 @@ function App() {
                 showManualRef={showManualRef}
                 qcFlaw={qcFlaw}
                 setQcFlaw={setQcFlaw}
-              />
-              {showManualRef && (
+              />              {showManualRef && (
                 <ManualRefForm
                   manualRef={manualRef}
                   setManualRef={setManualRef}
                   handleManualRefSubmit={handleManualRefSubmit}
                   manualRefInputRef={manualRefInputRef}
-                />
-              )}
-              <ImageUpload
-                showWebcam={showWebcam}
-                setShowWebcam={setShowWebcam}
-                webcamRef={webcamRef}
-                sessionId={sessionId}
-                trackingNumber={trackingNumber}
-                apiUrl={apiUrl}
-                setMessage={setMessage}
-              />
+                />              )}
+              
+              {/* Add the Undo Button */}
+              <button
+                className="btn btn-warning w-full mb-4"
+                onClick={handleUndo}
+              >
+                ↶ Undo Last Scan
+              </button>
+              
               <button
                 className="btn btn-secondary w-full mb-4"
                 onClick={async () => {
@@ -451,6 +536,81 @@ function App() {
             </div>
           )}
         </div>
+        {showNewProductForm && (
+          <form
+            onSubmit={handleNewProductSubmit}
+            className="mb-4 p-4 bg-base-200 rounded"
+          >
+            <h3 className="mb-2 font-bold">Add New Product</h3>
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Barcode"
+              value={newProduct.barcode}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, barcode: e.target.value })
+              }
+              required
+            />
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Description"
+              value={newProduct.description}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, description: e.target.value })
+              }
+              required
+            />
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Size"
+              value={newProduct.size}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, size: e.target.value })
+              }
+            />
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Price"
+              type="number"
+              value={newProduct.price}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, price: e.target.value })
+              }
+              required
+            />
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Manual Reference Number"
+              value={newProduct.manualRef}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, manualRef: e.target.value })
+              }
+            />
+            <input
+              className="input input-bordered w-full mb-2"
+              placeholder="Manufacturer"
+              value={newProduct.mfr}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, mfr: e.target.value })
+              }
+            />
+            <select
+              className="select select-bordered w-full mb-2"
+              value={newProduct.qcFlaw}
+              onChange={(e) =>
+                setNewProduct({ ...newProduct, qcFlaw: e.target.value })
+              }
+            >
+              <option value="none">No Flaw</option>
+              <option value="flaw">Missing Part</option>
+              <option value="damaged">Damaged</option>
+              <option value="other">Not in Original Packaging</option>
+            </select>
+            <button className="btn btn-primary w-full" type="submit">
+              Add Product
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );
