@@ -12,7 +12,7 @@ function ImageUpload({
 }) {
   return (
     <div className="mb-6">
-      <h2 className="text-lg font-semibold text-white mb-2">
+      <h2 className="text-lg font-semibold text-base-content mb-2">
         Attach Image to Deal
       </h2>
       <button

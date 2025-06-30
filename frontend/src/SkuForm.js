@@ -11,7 +11,7 @@ function SkuForm({
 }) {
   return (
     <form onSubmit={handleSkuSubmit} className="mb-6">
-      <label className="block mb-2 font-medium text-white">
+      <label className="block mb-2 font-medium text-base-content">
         UPC:
         <input
           type="text"
@@ -23,18 +23,19 @@ function SkuForm({
           placeholder="Scan or enter UPC"
         />
       </label>
-      <label className="block mb-2 font-medium text-white">
+      <label className="block mb-2 font-medium text-base-content">
         Quality Control:
         <select
+          className="select select-bordered w-full mb-2"
           value={qcFlaw}
           onChange={(e) => setQcFlaw(e.target.value)}
-          className="select select-bordered w-full mt-1"
-          disabled={showManualRef}
         >
           <option value="none">No Flaw</option>
           <option value="flaw">Missing Part</option>
           <option value="damaged">Damaged</option>
           <option value="other">Not in Original Packaging</option>
+          <option value="donotaccept">Do Not Accept</option>
+          <option value="tornpackaging">Torn Packaging</option>
         </select>
       </label>
       <button

@@ -44,37 +44,42 @@ const priceRules = [
 
 
 
+
 ];
 
 export function getPriceForName(name, flaw) {
   let price = 0;
   if (!name) return price;
-  for (const  rule of priceRules) {
+  
+  for (const rule of priceRules) {
     if (name.toLowerCase().includes(rule.keyword.toLowerCase())) {
       price += rule.price;
-      if (
-        flaw != "none" &&
-        (
-          rule.keyword.toLowerCase().includes("mask") ||
-          rule.keyword.toLowerCase().includes("cushion") ||
-          rule.keyword.toLowerCase().includes("water chamber") ||
-          rule.keyword.toLowerCase().includes("heated") ||
-          rule.keyword.toLowerCase().includes("standard") ||
-          rule.keyword.toLowerCase().includes("filters") ||
-          rule.keyword.toLowerCase().includes("ffm") ||
-          rule.keyword.toLowerCase().includes("leak") ||
-          rule.keyword.toLowerCase().includes("climatelinear") ||
-          rule.keyword.toLowerCase().includes("stpk") ||
-          rule.keyword.toLowerCase().includes("fitpack") ||
-          rule.keyword.toLowerCase().includes("frame") ||
-          rule.keyword.toLowerCase().includes("pillows") ||
-          rule.keyword.toLowerCase().includes("pillow")
-        )
-      ) {
-        price = 0;
-      } else if (flaw != "none") {
+      
+      // Check if it's a machine (based on machine keywords)
+      const isMachine = (
+        rule.keyword.toLowerCase().includes("airsense") ||
+        rule.keyword.toLowerCase().includes("aircurve") ||
+        rule.keyword.toLowerCase().includes("trilogy") ||
+        rule.keyword.toLowerCase().includes("airmini") ||
+        rule.keyword.toLowerCase().includes("astral") ||
+        rule.keyword.toLowerCase().includes("series 9") ||
+        rule.keyword.toLowerCase().includes("coughassist") ||
+        rule.keyword.toLowerCase().includes("oxygen concentrator")
+      );
+      
+      // Default condition: if flaw and it's a machine, do half off
+      if (flaw != "none" && isMachine) {
         price = rule.price * 0.5;
+      } 
+      // Else if flaw and it's a supply item, price = 0
+      else if (flaw != "none") {
+        price = 0;
       }
+      // Else return the actual price (no flaw)
+      else {
+        price = rule.price;
+      }
+      
       return price;
     }
   }

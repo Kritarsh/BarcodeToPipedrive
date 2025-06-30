@@ -3,7 +3,7 @@ import React from "react";
 function TrackingForm({ trackingNumber, setTrackingNumber, dealFound, trackingInputRef, onSubmit }) {
   return (
     <form onSubmit={onSubmit} className="mb-6">
-      <label className="block mb-2 font-medium text-white">
+      <label className="block mb-2 font-medium text-base-content">
         Tracking Number:
         <input
           type="text"

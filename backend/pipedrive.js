@@ -1,11 +1,10 @@
 import axios from 'axios';
-const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN; 
 const PIPEDRIVE_API_URL = 'https://api.pipedrive.com/v1';
 
-export async function addNoteToPipedrive(content, dealId) {
+export async function addNoteToPipedrive(content, dealId, apiToken) {
     try {
         const response = await axios.post(
-            `${PIPEDRIVE_API_URL}/notes?api_token=${PIPEDRIVE_API_TOKEN}`,
+            `${PIPEDRIVE_API_URL}/notes?api_token=${apiToken}`,
             {
                 content,
                 deal_id: dealId 

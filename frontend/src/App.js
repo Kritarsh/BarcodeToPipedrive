@@ -373,7 +373,7 @@ function App() {
             <>
               {/* CPAP Machine Dropdown */}
               <div className="mb-4">
-                <label className="block mb-2 font-medium text-white">
+                <label className="block mb-2 font-medium text-base-content">
                   Or select a CPAP machine:
                   <select
                     className="select select-bordered w-full mt-1"
@@ -452,7 +452,7 @@ function App() {
             <div className="alert alert-info text-center mb-2">{message}</div>
           )}
           {spreadsheetMatch !== null && (
-            <div className="text-center text-sm text-white">
+            <div className="text-center text-sm text-base-content">
               Spreadsheet Match:{" "}
               <span
                 className={
@@ -497,7 +497,7 @@ function App() {
           </select>
         </div>
         <div className="overflow-x-auto max-h-[70vh]">
-          <table className="table table-xs border border-white border-solid">
+          <table className="table table-xs border border-base-content border-solid">
             <thead>
               <tr>
                 {tableData[0] &&
@@ -506,7 +506,7 @@ function App() {
                     .map((col) => (
                       <th
                         key={col}
-                        className="border border-white border-solid bg-base-100 text-base-content"
+                        className="border border-base-content border-solid bg-base-100 text-base-content"
                       >
                         {col}
                       </th>
@@ -521,7 +521,7 @@ function App() {
                     .map(([key, val], j) => (
                       <td
                         key={j}
-                        className="border border-white border-solid bg-base-100 text-base-content"
+                        className="border border-base-content border-solid bg-base-100 text-base-content"
                       >
                         {val}
                       </td>
@@ -531,7 +531,7 @@ function App() {
             </tbody>
           </table>
           {tableData.length === 0 && (
-            <div className="text-gray-400 text-center mt-4">
+            <div className="text-base-content opacity-60 text-center mt-4">
               No data to display.
             </div>
           )}
@@ -604,7 +604,9 @@ function App() {
               <option value="none">No Flaw</option>
               <option value="flaw">Missing Part</option>
               <option value="damaged">Damaged</option>
-              <option value="other">Not in Original Packaging</option>
+              <option value="donotaccept">Do Not Accept</option>
+              <option value="tornpackaging">Torn Packaging</option>
+              <option value="other">Not in Original Packaging</option> 
             </select>
             <button className="btn btn-primary w-full" type="submit">
               Add Product

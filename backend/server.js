@@ -32,6 +32,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
+// Debug: Check if token is loaded
+console.log("PIPEDRIVE_API_TOKEN loaded:", PIPEDRIVE_API_TOKEN ? "✅ Yes" : "❌ No (undefined)");
+
 // In-memory session store (for demo)
 const redisClient = createClient({
   username: "default",
@@ -80,11 +83,18 @@ async function extractTrackingNumberfromBarcode(barcode) {
 }
 
 async function findDealIdByTrackingNumber(trackingNumber) {
+  console.log("findDealIdByTrackingNumber called with:", trackingNumber);
+  console.log("Using API token:", PIPEDRIVE_API_TOKEN ? "✅ Token exists" : "❌ Token is undefined");
+  
   const response = await axios.get(`${PIPEDRIVE_API_URL}/deals/search`, {
     params: { term: trackingNumber, exact_match: false },
     headers: { "x-api-token": PIPEDRIVE_API_TOKEN },
   });
+  console.log("Pipedrive search response status:", response.status);
+  
   const deals = response.data.data?.items || [];
+  console.log("Found deals:", deals.length);
+  
   return deals.length > 0 ? deals[0].item.id : null;
 }
 
@@ -96,10 +106,13 @@ function qcFlawLabel(value) {
       return "Damaged";
     case "other":
       return "Not in Original Packaging";
-    case "none":
-      return "No Flaw";
+    case "donotaccept":
+      return "Do not accept";
+    case "tornpackaging":
+      return "Torn Packaging";
     default:
-      return value;  }
+      return "No Flaw";
+  }
 }
 
 // --- Routes ---
@@ -166,7 +179,12 @@ app.post("/api/barcode", async (req, res) => {
           .filter(Boolean)
           .join("\n");
 
-        await addNoteToPipedrive(allNotesWithTotal, oldSession.dealId);
+        console.log("Attempting to add note to Pipedrive:");
+        console.log("- Deal ID:", oldSession.dealId);
+        console.log("- Token exists:", PIPEDRIVE_API_TOKEN ? "✅ Yes" : "❌ No");
+        console.log("- Content length:", allNotesWithTotal.length);
+
+        await addNoteToPipedrive(allNotesWithTotal, oldSession.dealId, PIPEDRIVE_API_TOKEN);
       }
       // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
