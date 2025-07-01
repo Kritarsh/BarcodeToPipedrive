@@ -606,7 +606,8 @@ function App() {
               <option value="damaged">Damaged</option>
               <option value="donotaccept">Do Not Accept</option>
               <option value="tornpackaging">Torn Packaging</option>
-              <option value="other">Not in Original Packaging</option> 
+              <option value="other">Not in Original Packaging</option>
+              <option value="yellow">Yellow</option> 
             </select>
             <button className="btn btn-primary w-full" type="submit">
               Add Product

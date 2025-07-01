@@ -110,6 +110,8 @@ function qcFlawLabel(value) {
       return "Do not accept";
     case "tornpackaging":
       return "Torn Packaging";
+    case "yellow":
+      return "Yellow";
     default:
       return "No Flaw";
   }
