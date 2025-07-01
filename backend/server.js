@@ -288,15 +288,19 @@ app.post("/api/barcode", async (req, res) => {
       const size = result.row.Size || "";
       const upc = barcode;
 
-      // Supplies: increment quantity in the correct spreadsheet
-      incrementSupplyQuantity({
-        collection: result.collection,
-        name,
-        upc,
-        size,
-        quantity: 1,
-        date: new Date(),
-      });
+      // Supplies: increment quantity in the correct spreadsheet ONLY if no flaw
+      if (!qcFlaw || qcFlaw === "none") {
+        incrementSupplyQuantity({
+          collection: result.collection,
+          name,
+          upc,
+          size,
+          quantity: 1,
+          date: new Date(),
+        });
+      } else {
+        console.log(`Skipping quantity increment for flawed item: ${name} (Flaw: ${qcFlawLabel(qcFlaw)})`);
+      }
 
       let calculatedPrice = 0;
       calculatedPrice = await getPriceForName(name, qcFlaw);
