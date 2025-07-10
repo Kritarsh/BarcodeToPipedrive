@@ -69,7 +69,7 @@ function App() {
       .catch(() => setInventoryData([]));
     axios
       .get(`${apiUrl}/api/overstock`)
-      .then((res) => setOverstockData(res.data.data))
+     .then((res) => setOverstockData(res.data.data))
       .catch(() => setOverstockData([]));
     axios
       .get(`${apiUrl}/api/machine-specifics`)
@@ -355,6 +355,13 @@ function App() {
   else if (selectedCollection === "machineSpecifics")
     tableData = machineSpecificsData;
 
+  const fieldOrders = {
+    inventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Date"],
+    overstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Date"],
+    machineSpecifics: ["Name", "UPC", "SerialNumber", "Quantity", "Date"], // adjust as needed
+  };
+  const currentFieldOrder = fieldOrders[selectedCollection] || [];
+
   return (
     <div className="min-h-screen w-full bg-base-200 flex">
       <div className="bg-base-100 shadow-xl w-[30%] p-6">
@@ -480,6 +487,16 @@ function App() {
               Total Price: ${totalPrice.toFixed(2)}
             </div>
           )}
+          
+          {/* Month End Inventory Link */}
+          <div className="mt-4">
+            <a 
+              href="/month-end-inventory" 
+              className="btn btn-outline btn-secondary w-full"
+            >
+              📊 Month End Inventory
+            </a>
+          </div>
         </div>
       </div>
       <div className="bg-base-100 rounded-xl shadow-lg p-6 w-[70%]">
@@ -500,32 +517,27 @@ function App() {
           <table className="table table-xs border border-base-content border-solid">
             <thead>
               <tr>
-                {tableData[0] &&
-                  Object.keys(tableData[0])
-                    .filter((col) => col !== "_id" && col !== "__v")
-                    .map((col) => (
-                      <th
-                        key={col}
-                        className="border border-base-content border-solid bg-base-100 text-base-content"
-                      >
-                        {col}
-                      </th>
-                    ))}
+                {currentFieldOrder.map((field) => (
+                  <th
+                    key={field}
+                    className="border border-base-content border-solid bg-base-100 text-base-content"
+                  >
+                    {field}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {tableData.map((row, i) => (
                 <tr key={i}>
-                  {Object.entries(row)
-                    .filter(([key]) => key !== "_id" && key !== "__v")
-                    .map(([key, val], j) => (
-                      <td
-                        key={j}
-                        className="border border-base-content border-solid bg-base-100 text-base-content"
-                      >
-                        {val}
-                      </td>
-                    ))}
+                  {currentFieldOrder.map((field, j) => (
+                    <td
+                      key={j}
+                      className="border border-base-content border-solid bg-base-100 text-base-content"
+                    >
+                      {row[field] !== undefined ? row[field] : "N/A"}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>

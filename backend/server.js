@@ -20,6 +20,9 @@ import mongoose from "mongoose";
 import Inventory from "./models/Inventory.js";
 import Overstock from "./models/Overstock.js";
 import MachineSpecific from "./models/MachineSpecific.js";
+import MonthEndInventory from "./models/MonthEndInventory.js";
+import MonthEndOverstock from "./models/MonthEndOverstock.js";
+import path from "path";
 
 dotenv.config();
 
@@ -28,7 +31,9 @@ app.use(express.json());
 app.use(cors());
 console.log("Server started");
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const PIPEDRIVE_API_TOKEN = process.env.PIPEDRIVE_API_TOKEN;
 const PIPEDRIVE_API_URL = "https://api.pipedrive.com/v1";
 
@@ -502,39 +507,326 @@ app.get("/api/machine-specifics", async (req, res) => {
   }
 });
 
-// New endpoint to add a product manually
-app.post("/api/product/new", async (req, res) => {
-  const {
-    barcode,
-    description,
-    size,
-    price,
-    qcFlaw,
-    manualRef,
-    sessionId,
-    serialNumber,
-  } = req.body;
-  if (!barcode || !description || !sessionId) {
-    return res
-      .status(400)
-      .json({ error: "barcode, description, and sessionId are required" });
+// Month End Inventory endpoints
+app.get("/api/month-end-inventory", async (req, res) => {
+  try {
+    console.log("Attempting to fetch Month End Inventory data...");
+    console.log("MonthEndInventory model collection name:", MonthEndInventory.collection.name);
+    
+    const monthEndInventoryData = await MonthEndInventory.find();
+    console.log("Found Month End Inventory documents:", monthEndInventoryData.length);
+    console.log("Sample document:", monthEndInventoryData[0]);
+    
+    // Convert Decimal128 Price values to numbers for frontend
+    const processedData = monthEndInventoryData.map(item => ({
+      ...item.toObject(),
+      Price: item.Price ? parseFloat(item.Price.toString()) : 0
+    }));
+    
+    res.json({ data: processedData });
+  } catch (err) {
+    console.error("Error fetching month end inventory:", err);
+    res.status(500).json({ error: "Failed to fetch month end inventory data" });
+  }
+});
+
+app.get("/api/month-end-overstock", async (req, res) => {
+  try {
+    console.log("Attempting to fetch Month End Overstock data...");
+    console.log("MonthEndOverstock model collection name:", MonthEndOverstock.collection.name);
+    
+    const monthEndOverstockData = await MonthEndOverstock.find();
+    console.log("Found Month End Overstock documents:", monthEndOverstockData.length);
+    console.log("Sample document:", monthEndOverstockData[0]);
+    
+    res.json({ data: monthEndOverstockData });
+  } catch (err) {
+    console.error("Error fetching month end overstock:", err);
+    res.status(500).json({ error: "Failed to fetch month end overstock data" });
+  }
+});
+
+// Month End barcode scan handler
+app.post("/api/month-end/barcode", async (req, res) => {
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw } = req.body;
+  if (!scanType || !barcode || !sessionId) {
+    return res.status(400).json({ error: "scanType, barcode, and sessionId are required" });
   }
 
   try {
-    // Add to MongoDB Inventory
-    const newProduct = new Overstock({
-      RefNum: manualRef || "", // <-- set RefNum here
-      UPC: barcode,
-      Style: description,
-      Size: size || "",
-      Price: price || 0,
-      qcFlaw: qcFlaw || "none",
-      Date: new Date(),
-      Quantity: 0,
+    if (scanType === "sku") {
+      const currentSession = await getSession(sessionId);
+      
+      const machineKeywords = [
+        "AirSense 10",
+        "AirSense 11",
+        "AirCurve VAuto",
+        "AirCurve ASV",
+        "AirCurve ST",
+        "Trilogy Evo",
+        "AirMini AutoSet",
+        "Astral",
+        "Series 9 AutoSet",
+        "Series 9 CPAP",
+        "Series 9 BiPAP",
+        "Series 9 Elite",
+      ];
+      const isMachine = machineKeywords.some((keyword) =>
+        barcode.toLowerCase().includes(keyword.toLowerCase())
+      );
+
+      if (isMachine) {
+        // Get price for the machine
+        const machinePrice = await getPriceForName(barcode, qcFlaw);
+
+        // Store machine data in session for month end processing
+        if (!currentSession.noteContent) currentSession.noteContent = [];
+        currentSession.noteContent.push(`Machine: ${barcode}${
+          serialNumber ? ` Serial Number: ${serialNumber}` : ""
+        }. Price: $${machinePrice}`);
+
+        if (!currentSession.skuEntries) currentSession.skuEntries = [];
+        currentSession.skuEntries.push({
+          description: barcode,
+          size: "",
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber || "",
+          price: machinePrice,
+          isMachine: true,
+          upc: barcode,
+          name: barcode,
+        });
+
+        // Save machine immediately to Month End Overstock
+        const monthEndProduct = new MonthEndOverstock({
+          RefNum: "",
+          UPC: barcode,
+          Style: barcode,
+          Size: "",
+          MFR: "Machine",
+          Quantity: 1,
+          Date: new Date(),
+          Price: machinePrice,
+        });
+        await monthEndProduct.save();
+
+        if (!currentSession.prices) currentSession.prices = [];
+        currentSession.prices.push(machinePrice);
+
+        await setSession(sessionId, currentSession);
+
+        return res.json({
+          spreadsheetMatch: null,
+          price: machinePrice,
+          message: "Machine added to month end inventory!",
+        });
+      }
+
+      // Process supplies for month end
+      const result = await matchSkuWithDatabase(barcode);
+      if (!result.match) {
+        return res.json({
+          match: false,
+          reason: result.reason,
+          message: result.message,
+        });
+      }
+
+      const name = result.row.Name || result.row.Description || result.row.Style || "";
+      const size = result.row.Size || "";
+      const upc = barcode;
+
+      // Store supply data in session for month end processing
+      let calculatedPrice = 0;
+      calculatedPrice = await getPriceForName(name, qcFlaw);
+
+      if (!currentSession.noteContent) currentSession.noteContent = [];
+      currentSession.noteContent.push(`SKU scanned: ${barcode}. Spreadsheet match: ${
+        result.collection
+      } - ${name}. Price: $${calculatedPrice}. Description: ${
+        result.row.Description || result.row.Name || result.row.Style || ""
+      }`);
+
+      if (!currentSession.prices) currentSession.prices = [];
+      currentSession.prices.push(calculatedPrice);
+
+      if (!currentSession.skuEntries) currentSession.skuEntries = [];
+      currentSession.skuEntries.push({
+        description: result.row.Description || result.row.Name || result.row.Style || "",
+        size: result.row.Size || "",
+        qcFlaw: req.body.qcFlaw,
+        serialNumber: serialNumber || "",
+        price: calculatedPrice,
+        collection: result.collection,
+        upc: barcode,
+        name: name,
+        isMachine: false,
+      });
+
+      // Save immediately to Month End collection based on original collection
+      const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+      const monthEndProduct = new monthEndCollection({
+        RefNum: "",
+        UPC: upc,
+        Style: result.row.Description || result.row.Name || result.row.Style || "",
+        Size: result.row.Size || "",
+        MFR: result.row.MFR || result.collection,
+        Quantity: 1,
+        Date: new Date(),
+        Price: calculatedPrice,
+      });
+      await monthEndProduct.save();
+
+      await setSession(sessionId, currentSession);
+
+      let descriptionResult;
+      try {
+        descriptionResult = await returnProductDescription({
+          collection: result.collection,
+          matchedColumn: result.matchedColumn,
+          rowValue: result.row,
+          properValue: result.row[result.matchedColumn],
+          upc: barcode,
+        });
+        await writeUPCToMongoDB({
+          collection: result.collection,
+          matchedColumn: result.matchedColumn,
+          rowValue: result.row[result.matchedColumn],
+          upc: barcode,
+        });
+      } catch (error) {
+        console.error("Error writing to spreadsheet:", error);
+      }
+
+      return res.json({
+        note: result,
+        noteContent: currentSession.noteContent,
+        spreadsheetMatch: result.collection,
+        price: calculatedPrice,
+        descriptionResult: descriptionResult || {},
+        row: result.row,
+      });
+    }
+  } catch (error) {
+    console.error("Error processing month end SKU:", error);
+    return res.status(500).json({ error: "Failed to process month end SKU" });
+  }
+});
+
+// Month End manual reference handler
+app.post("/api/month-end/barcode/manual", async (req, res) => {
+  const { barcode, manualRef, sessionId, description, price, serialNumber, qcFlaw } = req.body;
+  if (!barcode || !manualRef || !sessionId) {
+    return res.status(400).json({ error: "barcode, manualRef, and sessionId are required" });
+  }
+
+  const currentSession = await getSession(sessionId);
+  const matchResult = await matchSkuWithDatabaseManual(barcode, manualRef);
+
+  if (matchResult.match) {
+    let nameForPricing = (matchResult.row && (matchResult.row.Name || matchResult.row.Description || matchResult.row.Style)) || "";
+    let calculatedPrice = 0;
+    calculatedPrice = await getPriceForName(nameForPricing, qcFlaw);
+
+    if (!currentSession.noteContent) currentSession.noteContent = [];
+    currentSession.noteContent.push(`SKU scanned: ${barcode}. Spreadsheet match: ${matchResult.file} - ${matchResult.row[matchResult.matchedColumn]}. Price: $${calculatedPrice}`);
+
+    if (!currentSession.prices) currentSession.prices = [];
+    currentSession.prices.push(calculatedPrice);
+
+    if (!currentSession.skuEntries) currentSession.skuEntries = [];
+    currentSession.skuEntries.push({
+      description: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      size: matchResult.row.Size || "",
+      qcFlaw: qcFlaw,
+      serialNumber: serialNumber || "",
+      price: calculatedPrice,
+      upc: barcode,
     });
+
+    // Save immediately to Month End collection based on original collection
+    const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+    const monthEndProduct = new monthEndCollection({
+      RefNum: manualRef || "",
+      UPC: barcode,
+      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      Size: matchResult.row.Size || "",
+      MFR: matchResult.row.MFR || matchResult.collection,
+      Quantity: 1,
+      Date: new Date(),
+      Price: calculatedPrice,
+    });
+    await monthEndProduct.save();
+
+    await setSession(sessionId, currentSession);
+
+    let descriptionResult;
+    try {
+      descriptionResult = await returnProductDescription({
+        collection: matchResult.collection,
+        matchedColumn: matchResult.matchedColumn,
+        rowValue: matchResult.row,
+        properValue: matchResult.row[matchResult.matchedColumn],
+        upc: barcode,
+      });
+    } catch (error) {
+      console.error("Error with description result:", error);
+    }
+
+    return res.json({
+      match: true,
+      message: "SKU found and added to month end inventory!",
+      spreadsheetMatch: !!matchResult.collection,
+      price: calculatedPrice,
+      descriptionResult: descriptionResult || {},
+      noteContent: currentSession.noteContent,
+    });
+  }
+
+  return res.status(404).json({
+    match: false,
+    message: "SKU not found even with the manual reference.",
+  });
+});
+
+// Month End new product handler
+app.post("/api/month-end/product/new", async (req, res) => {
+  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, serialNumber, mfr } = req.body;
+  if (!barcode || !description || !sessionId) {
+    return res.status(400).json({ error: "barcode, description, and sessionId are required" });
+  }
+
+  try {
+    // Determine which month end collection to use
+    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
+    
+    let newProduct;
+    if (isInventoryItem) {
+      newProduct = new MonthEndInventory({
+        RefNum: manualRef || "",
+        UPC: barcode,
+        Style: description,
+        Size: size || "",
+        MFR: mfr,
+        Quantity: 1,
+        Date: new Date(),
+        Price: price || 0,
+      });
+    } else {
+      newProduct = new MonthEndOverstock({
+        RefNum: manualRef || "",
+        UPC: barcode,
+        Style: description,
+        Size: size || "",
+        MFR: mfr,
+        Quantity: 1,
+        Date: new Date(),
+        Price: price || 0,
+      });
+    }
+    
     await newProduct.save();
 
-    // Optionally update session
     const currentSession = await getSession(sessionId);
     if (!currentSession.skuEntries) currentSession.skuEntries = [];
     currentSession.skuEntries.push({
@@ -544,18 +836,19 @@ app.post("/api/product/new", async (req, res) => {
       serialNumber: serialNumber || "",
       price: price || 0,
       isManual: true,
+      upc: barcode,
     });
     await setSession(sessionId, currentSession);
 
-    return res.json({ message: "Product added!", product: newProduct });
+    return res.json({ message: "Product added to month end inventory!", product: newProduct });
   } catch (err) {
-    console.error("Error adding new product:", err);
-    return res.status(500).json({ error: "Failed to add new product" });
+    console.error("Error adding new month end product:", err);
+    return res.status(500).json({ error: "Failed to add new month end product" });
   }
 });
 
-// Add undo endpoint
-app.post("/api/barcode/undo", async (req, res) => {
+// Month End finish handler
+app.post("/api/month-end/finish", async (req, res) => {
   const { sessionId } = req.body;
   
   if (!sessionId) {
@@ -566,48 +859,61 @@ app.post("/api/barcode/undo", async (req, res) => {
     const currentSession = await getSession(sessionId);
     
     if (!currentSession || !currentSession.skuEntries || currentSession.skuEntries.length === 0) {
-      return res.status(400).json({ error: "No items to undo" });
+      return res.status(400).json({ error: "No items found in the month end session." });
     }
 
-    // Get the last entry to undo
-    const lastEntry = currentSession.skuEntries.pop();
-    
-    // Remove the last note content if it exists
-    if (currentSession.noteContent && currentSession.noteContent.length > 0) {
-      currentSession.noteContent.pop();
-    }
-    
-    // Remove the last price if it exists
-    if (currentSession.prices && currentSession.prices.length > 0) {
-      currentSession.prices.pop();
+    // Process all scanned items and add them to appropriate month end collections
+    for (const item of currentSession.skuEntries) {
+      if (item.isMachine) {
+        // For machines, add to month end overstock
+        const monthEndProduct = new MonthEndOverstock({
+          RefNum: "",
+          UPC: item.upc,
+          Style: item.description,
+          Size: "",
+          MFR: "Machine",
+          Quantity: 1,
+          Date: new Date(),
+          Price: item.price || 0,
+        });
+        await monthEndProduct.save();
+      } else if (!item.isManual) {
+        // For supplies, determine collection based on original collection
+        const collection = item.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+        const monthEndProduct = new collection({
+          RefNum: "",
+          UPC: item.upc,
+          Style: item.description,
+          Size: item.size || "",
+          MFR: item.collection,
+          Quantity: 1,
+          Date: new Date(),
+          Price: item.price || 0,
+        });
+        await monthEndProduct.save();
+      }
     }
 
-    // If it was a machine, remove from MachineSpecific collection
-    if (lastEntry.isMachine) {
-      await MachineSpecific.deleteOne({
-        Name: lastEntry.description,
-        SerialNumber: lastEntry.serialNumber || ""
-      });
-    } else {
-      // If it was a supply, decrement the quantity
-      // Note: You may need to implement decrementSupplyQuantity function
-      // For now, we'll just log it
-      console.log(`Should decrement quantity for: ${lastEntry.description}`);
-    }
-
-    // Save the updated session
-    await setSession(sessionId, currentSession);
-
-    return res.json({
-      message: "Last scan undone successfully",
-      undoneItem: lastEntry,
-      remainingItems: currentSession.skuEntries.length
+    // Clear the session
+    await setSession(sessionId, {
+      noteContent: [],
+      prices: [],
+      skuEntries: [],
     });
 
+    return res.json({ message: "Month end inventory completed successfully." });
   } catch (error) {
-    console.error("Error undoing last scan:", error);
-    return res.status(500).json({ error: "Failed to undo last scan" });
+    console.error("Error in month end finish:", error);
+    return res.status(500).json({ error: "Failed to complete month end inventory" });
   }
+});
+
+// Serve static files from React build
+app.use(express.static(path.join(__dirname, '../frontend/build')));
+
+// More specific catch-all that avoids API routes
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
 // --- Start Server ---
