@@ -1,3 +1,17 @@
 .env
 *.env
 node_modules/
+projectslides.aux
+projectslides.fdb_latexmk
+projectslides.fls
+projectslides.log
+projectslides.nav
+projectslides.out
+projectslides.pdf
+projectslides.snm
+projectslides.synctex.gz
+projectslides.tex
+projectslides.toc
+Untitled-1.ini
+x.txt
+
