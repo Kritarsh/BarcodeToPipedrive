@@ -29,6 +29,15 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// Add request logging middleware
+app.use((req, res, next) => {
+  if (req.url.includes('/api/month-end/')) {
+    console.log(`🔥 MONTH END REQUEST: ${req.method} ${req.url}`, req.body);
+  }
+  next();
+});
+
 console.log("Server started");
 
 const __filename = fileURLToPath(import.meta.url);
@@ -336,6 +345,30 @@ app.post("/api/barcode", async (req, res) => {
 
       await setSession(sessionId, currentSession);
 
+      // Also save to Month End collection when UPC is scanned - increment if exists (UPC as primary key)
+      const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+      await monthEndCollection.findOneAndUpdate(
+        {
+          UPC: upc,
+          Style: result.row.Description || result.row.Name || result.row.Style || "",
+          Size: result.row.Size || "",
+          MFR: result.row.MFR || result.collection
+        },
+        {
+          $inc: { Quantity: 1 },
+          $setOnInsert: { RefNum: "" }, // Only set on insert
+          $set: { 
+            Date: new Date(),
+            Price: calculatedPrice
+          }
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
       // ADD THIS BLOCK - Get description result like in manual case
       let descriptionResult;
       try {
@@ -438,6 +471,30 @@ app.post("/api/barcode/manual", async (req, res) => {
 
     await setSession(sessionId, currentSession);
 
+    // Also save to corresponding Month End collection with calculated price - increment if exists (RefNum as primary key)
+    const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+    await monthEndCollection.findOneAndUpdate(
+      {
+        RefNum: manualRef || "",
+        Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+        Size: matchResult.row.Size || "",
+        MFR: matchResult.row.MFR || matchResult.collection
+      },
+      {
+        $inc: { Quantity: 1 },
+        $set: { 
+          UPC: barcode,
+          Date: new Date(),
+          Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
     let descriptionResult;
     try {
       descriptionResult = await returnProductDescription({
@@ -462,7 +519,7 @@ app.post("/api/barcode/manual", async (req, res) => {
 
     return res.json({
       match: true,
-      message: "SKU found and note added!",
+      message: "SKU found, note added, and saved to month end inventory!",
       spreadsheetMatch: !!matchResult.collection,
       price: calculatedPrice,
       descriptionResult: descriptionResult || {},
@@ -471,10 +528,105 @@ app.post("/api/barcode/manual", async (req, res) => {
   }
 
   // If no match, return a response so frontend can prompt for new product
-  return res.status(404).json({
+  return res.json({
     match: false,
     message: "SKU not found even with the manual reference.",
   });
+});
+
+// Add new product to main inventory/overstock and Month End collections
+app.post("/api/product/new", async (req, res) => {
+  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr } = req.body;
+  if (!barcode || !description || !sessionId) {
+    return res.status(400).json({ error: "barcode, description, and sessionId are required" });
+  }
+
+  try {
+    // Determine which collection to use based on manufacturer
+    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
+    
+    // Calculate price using existing pricing logic
+    const calculatedPrice = await getPriceForName(description, qcFlaw);
+    
+    // Save to main collection
+    let newProduct;
+    if (isInventoryItem) {
+      newProduct = new Inventory({
+        RefNum: manualRef || "",
+        UPC: barcode,
+        Style: description,
+        Size: size || "",
+        MFR: mfr,
+        Quantity: 0, // Start with 0 as requested
+        Date: new Date(),
+      });
+    } else {
+      newProduct = new Overstock({
+        RefNum: manualRef || "",
+        UPC: barcode,
+        Style: description,
+        Size: size || "",
+        MFR: mfr || "Unknown",
+        Quantity: 0, // Start with 0 as requested
+        Date: new Date(),
+      });
+    }
+    
+    await newProduct.save();
+
+    // Also save to corresponding Month End collection with calculated price - use appropriate primary key
+    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
+    await monthEndCollection.findOneAndUpdate(
+      {
+        // Use RefNum as primary key if provided, otherwise use UPC
+        ...(manualRef ? 
+          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
+          { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") }
+        )
+      },
+      {
+        $setOnInsert: { 
+          Quantity: 0,
+          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
+        },
+        $set: { 
+          UPC: barcode,
+          Date: new Date(),
+          Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Add to session
+    const currentSession = await getSession(sessionId);
+    if (!currentSession.skuEntries) currentSession.skuEntries = [];
+    currentSession.skuEntries.push({
+      description,
+      size: size || "",
+      qcFlaw: qcFlaw || "none",
+      serialNumber: "",
+      price: calculatedPrice,
+      isManual: true,
+      upc: barcode,
+      collection: isInventoryItem ? "Inventory" : "Overstock",
+    });
+    await setSession(sessionId, currentSession);
+
+    return res.json({ 
+      message: "Product added to both main inventory and month end collections!", 
+      product: newProduct,
+      monthEndProduct: monthEndProduct,
+      price: calculatedPrice
+    });
+  } catch (err) {
+    console.error("Error adding new product:", err);
+    return res.status(500).json({ error: "Failed to add new product" });
+  }
 });
 
 // New endpoint to fetch inventory data from MongoDB
@@ -546,8 +698,107 @@ app.get("/api/month-end-overstock", async (req, res) => {
   }
 });
 
+// Test endpoint to verify CSV export routing
+app.get("/api/month-end-inventory/test", (req, res) => {
+  res.json({ message: "Month End Inventory route is working!" });
+});
+
+// Month End CSV export endpoints
+app.get("/api/month-end-inventory/export-csv", async (req, res) => {
+  try {
+    console.log("CSV Export request received for Month End Inventory");
+    const monthEndInventoryData = await MonthEndInventory.find();
+    console.log("Found documents for export:", monthEndInventoryData.length);
+    
+    // Define CSV headers
+    const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+    
+    // Convert data to CSV format
+    let csvContent = headers.join(",") + "\n";
+    
+    if (monthEndInventoryData.length === 0) {
+      // If no data, still return empty CSV with headers
+      console.log("No data found, returning empty CSV with headers");
+    } else {
+      monthEndInventoryData.forEach(item => {
+        const row = [
+          `"${item.RefNum || ""}"`,
+          `"${item.UPC || ""}"`,
+          `"${item.MFR || ""}"`,
+          `"${item.Style || ""}"`,
+          `"${item.Size || ""}"`,
+          item.Quantity || 0,
+          item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+          `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+        ];
+        csvContent += row.join(",") + "\n";
+      });
+    }
+
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+    const filename = `month-end-inventory-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+    console.log("CSV export completed successfully");
+    
+  } catch (err) {
+    console.error("Error exporting Month End Inventory CSV:", err);
+    res.status(500).json({ error: "Failed to export Month End Inventory CSV" });
+  }
+});
+
+app.get("/api/month-end-overstock/export-csv", async (req, res) => {
+  try {
+    console.log("CSV Export request received for Month End Overstock");
+    const monthEndOverstockData = await MonthEndOverstock.find();
+    console.log("Found documents for export:", monthEndOverstockData.length);
+    
+    // Define CSV headers
+    const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+    
+    // Convert data to CSV format
+    let csvContent = headers.join(",") + "\n";
+    
+    if (monthEndOverstockData.length === 0) {
+      // If no data, still return empty CSV with headers
+      console.log("No data found, returning empty CSV with headers");
+    } else {
+      monthEndOverstockData.forEach(item => {
+        const row = [
+          `"${item.RefNum || ""}"`,
+          `"${item.UPC || ""}"`,
+          `"${item.MFR || ""}"`,
+          `"${item.Style || ""}"`,
+          `"${item.Size || ""}"`,
+          item.Quantity || 0,
+          item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+          `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+        ];
+        csvContent += row.join(",") + "\n";
+      });
+    }
+
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+    const filename = `month-end-overstock-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+    console.log("CSV export completed successfully");
+    
+  } catch (err) {
+    console.error("Error exporting Month End Overstock CSV:", err);
+    res.status(500).json({ error: "Failed to export Month End Overstock CSV" });
+  }
+});
+
 // Month End barcode scan handler
 app.post("/api/month-end/barcode", async (req, res) => {
+  console.log("🔥 MONTH END BARCODE HANDLER HIT!", req.body);
   const { scanType, barcode, sessionId, price, serialNumber, qcFlaw } = req.body;
   if (!scanType || !barcode || !sessionId) {
     return res.status(400).json({ error: "scanType, barcode, and sessionId are required" });
@@ -597,18 +848,28 @@ app.post("/api/month-end/barcode", async (req, res) => {
           name: barcode,
         });
 
-        // Save machine immediately to Month End Overstock
-        const monthEndProduct = new MonthEndOverstock({
-          RefNum: "",
-          UPC: barcode,
-          Style: barcode,
-          Size: "",
-          MFR: "Machine",
-          Quantity: 1,
-          Date: new Date(),
-          Price: machinePrice,
-        });
-        await monthEndProduct.save();
+        // Save machine immediately to Month End Overstock - increment if exists
+        await MonthEndOverstock.findOneAndUpdate(
+          {
+            UPC: barcode,
+            Style: barcode,
+            Size: "",
+            MFR: "Machine"
+          },
+          {
+            $inc: { Quantity: 1 },
+            $set: { 
+              RefNum: "",
+              Date: new Date(),
+              Price: machinePrice
+            }
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          }
+        );
 
         if (!currentSession.prices) currentSession.prices = [];
         currentSession.prices.push(machinePrice);
@@ -663,19 +924,29 @@ app.post("/api/month-end/barcode", async (req, res) => {
         isMachine: false,
       });
 
-      // Save immediately to Month End collection based on original collection
+      // Save immediately to Month End collection based on original collection - increment if exists (UPC as primary key)
       const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-      const monthEndProduct = new monthEndCollection({
-        RefNum: "",
-        UPC: upc,
-        Style: result.row.Description || result.row.Name || result.row.Style || "",
-        Size: result.row.Size || "",
-        MFR: result.row.MFR || result.collection,
-        Quantity: 1,
-        Date: new Date(),
-        Price: calculatedPrice,
-      });
-      await monthEndProduct.save();
+      await monthEndCollection.findOneAndUpdate(
+        {
+          UPC: upc,
+          Style: result.row.Description || result.row.Name || result.row.Style || "",
+          Size: result.row.Size || "",
+          MFR: result.row.MFR || result.collection
+        },
+        {
+          $inc: { Quantity: 1 },
+          $setOnInsert: { RefNum: "" }, // Only set on insert
+          $set: { 
+            Date: new Date(),
+            Price: calculatedPrice
+          }
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
 
       await setSession(sessionId, currentSession);
 
@@ -715,6 +986,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
 
 // Month End manual reference handler
 app.post("/api/month-end/barcode/manual", async (req, res) => {
+  console.log("🔥 MONTH END MANUAL REFERENCE HANDLER HIT!", req.body);
   const { barcode, manualRef, sessionId, description, price, serialNumber, qcFlaw } = req.body;
   if (!barcode || !manualRef || !sessionId) {
     return res.status(400).json({ error: "barcode, manualRef, and sessionId are required" });
@@ -744,19 +1016,29 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       upc: barcode,
     });
 
-    // Save immediately to Month End collection based on original collection
+    // Save immediately to Month End collection based on original collection - increment if exists (RefNum as primary key)
     const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-    const monthEndProduct = new monthEndCollection({
-      RefNum: manualRef || "",
-      UPC: barcode,
-      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      Size: matchResult.row.Size || "",
-      MFR: matchResult.row.MFR || matchResult.collection,
-      Quantity: 1,
-      Date: new Date(),
-      Price: calculatedPrice,
-    });
-    await monthEndProduct.save();
+    await monthEndCollection.findOneAndUpdate(
+      {
+        RefNum: manualRef || "",
+        Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+        Size: matchResult.row.Size || "",
+        MFR: matchResult.row.MFR || matchResult.collection
+      },
+      {
+        $inc: { Quantity: 1 },
+        $set: { 
+          UPC: barcode,
+          Date: new Date(),
+          Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
 
     await setSession(sessionId, currentSession);
 
@@ -783,7 +1065,8 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
     });
   }
 
-  return res.status(404).json({
+  // If no match, return a response so frontend can prompt for new product
+  return res.json({
     match: false,
     message: "SKU not found even with the manual reference.",
   });
@@ -797,35 +1080,35 @@ app.post("/api/month-end/product/new", async (req, res) => {
   }
 
   try {
-    // Determine which month end collection to use
+    // Determine which month end collection to use and save with increment logic (use appropriate primary key)
     const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
+    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
     
-    let newProduct;
-    if (isInventoryItem) {
-      newProduct = new MonthEndInventory({
-        RefNum: manualRef || "",
-        UPC: barcode,
-        Style: description,
-        Size: size || "",
-        MFR: mfr,
-        Quantity: 1,
-        Date: new Date(),
-        Price: price || 0,
-      });
-    } else {
-      newProduct = new MonthEndOverstock({
-        RefNum: manualRef || "",
-        UPC: barcode,
-        Style: description,
-        Size: size || "",
-        MFR: mfr,
-        Quantity: 1,
-        Date: new Date(),
-        Price: price || 0,
-      });
-    }
-    
-    await newProduct.save();
+    const newProduct = await monthEndCollection.findOneAndUpdate(
+      {
+        // Use RefNum as primary key if provided, otherwise use UPC
+        ...(manualRef ? 
+          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr } :
+          { UPC: barcode, Style: description, Size: size || "", MFR: mfr }
+        )
+      },
+      {
+        $inc: { Quantity: 1 },
+        $setOnInsert: { 
+          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
+        },
+        $set: { 
+          UPC: barcode,
+          Date: new Date(),
+          Price: price || 0
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
 
     const currentSession = await getSession(sessionId);
     if (!currentSession.skuEntries) currentSession.skuEntries = [];
@@ -862,38 +1145,7 @@ app.post("/api/month-end/finish", async (req, res) => {
       return res.status(400).json({ error: "No items found in the month end session." });
     }
 
-    // Process all scanned items and add them to appropriate month end collections
-    for (const item of currentSession.skuEntries) {
-      if (item.isMachine) {
-        // For machines, add to month end overstock
-        const monthEndProduct = new MonthEndOverstock({
-          RefNum: "",
-          UPC: item.upc,
-          Style: item.description,
-          Size: "",
-          MFR: "Machine",
-          Quantity: 1,
-          Date: new Date(),
-          Price: item.price || 0,
-        });
-        await monthEndProduct.save();
-      } else if (!item.isManual) {
-        // For supplies, determine collection based on original collection
-        const collection = item.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-        const monthEndProduct = new collection({
-          RefNum: "",
-          UPC: item.upc,
-          Style: item.description,
-          Size: item.size || "",
-          MFR: item.collection,
-          Quantity: 1,
-          Date: new Date(),
-          Price: item.price || 0,
-        });
-        await monthEndProduct.save();
-      }
-    }
-
+    // Items are already saved to Month End collections when scanned, so just clear the session
     // Clear the session
     await setSession(sessionId, {
       noteContent: [],

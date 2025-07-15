@@ -41,6 +41,7 @@ const priceRules = [
   {keyword: "Frame", price: 10},
   {keyword: "Pillows", price: 3},
   {keyword: "Pillow", price: 3},
+  {keyword: "W/", price: 10}
 
 
 

@@ -49,6 +49,13 @@ function MonthEndInventory() {
     }
   }, []);
 
+  // Focus manual reference input only when the form is shown
+  useEffect(() => {
+    if (showManualRef && manualRefInputRef.current) {
+      manualRefInputRef.current.focus();
+    }
+  }, [showManualRef]);
+
   // Function to refresh month end data
   const refreshMonthEndData = () => {
     // Refresh Month End Inventory data
@@ -92,15 +99,7 @@ function MonthEndInventory() {
       .catch(() => setMonthEndOverstockData([]));
   }, []);
 
-  const setSkuInputAndFocus = (el) => {
-    skuInputRef.current = el;
-    if (el) el.focus();
-  };
 
-  const setManualRefInputAndFocus = (el) => {
-    manualRefInputRef.current = el;
-    if (el) el.focus();
-  };
 
   const handleSkuSubmit = async (e) => {
     e.preventDefault();
@@ -109,7 +108,7 @@ function MonthEndInventory() {
     try {
       // Check if it's a machine
       const machineKeywords = [
-        "AirSense 10",
+        "AirSense 10",  
         "AirSense 11",
         "AirCurve VAuto",
         "AirCurve ASV",
@@ -170,11 +169,6 @@ function MonthEndInventory() {
         setMessage(res.data.message);
         setShowManualRef(true);
         setPendingSku(sku);
-        setTimeout(() => {
-          if (manualRefInputRef.current) {
-            manualRefInputRef.current.focus();
-          }
-        }, 100);
         return;
       }
 
@@ -336,6 +330,51 @@ function MonthEndInventory() {
     }
   };
 
+  // Function to handle CSV export
+  const handleExportCSV = async () => {
+    try {
+      const endpoint = selectedCollection === "monthEndInventory" 
+        ? "/api/month-end-inventory/export-csv"
+        : "/api/month-end-overstock/export-csv";
+      
+      const response = await fetch(`${apiUrl}${endpoint}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          setMessage("No data available to export");
+          return;
+        }
+        throw new Error("Failed to export CSV");
+      }
+      
+      // Get the filename from the response headers
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `month-end-${selectedCollection}-export.csv`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      // Create blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      setMessage(`${selectedCollection === "monthEndInventory" ? "Inventory" : "Overstock"} CSV exported successfully!`);
+    } catch (error) {
+      console.error("Error exporting CSV:", error);
+      setMessage("Failed to export CSV. Please try again.");
+    }
+  };
+
   // Determine which data to show
   let tableData = [];
   if (selectedCollection === "monthEndInventory") tableData = monthEndInventoryData;
@@ -359,7 +398,7 @@ function MonthEndInventory() {
             sku={sku}
             setSku={setSku}
             handleSkuSubmit={handleSkuSubmit}
-            setSkuInputAndFocus={setSkuInputAndFocus}
+            skuInputRef={skuInputRef}
             showManualRef={showManualRef}
             qcFlaw={qcFlaw}
             setQcFlaw={setQcFlaw}
@@ -370,7 +409,7 @@ function MonthEndInventory() {
               manualRef={manualRef}
               setManualRef={setManualRef}
               handleManualRefSubmit={handleManualRefSubmit}
-              setManualRefInputAndFocus={setManualRefInputAndFocus}
+              manualRefInputRef={manualRefInputRef}
               qcFlaw={qcFlaw}
               setQcFlaw={setQcFlaw}
             />
@@ -493,6 +532,13 @@ function MonthEndInventory() {
                 <option value="monthEndInventory">Month End Inventory</option>
                 <option value="monthEndOverstock">Month End Overstock</option>
               </select>
+              <button
+                onClick={handleExportCSV}
+                className="btn btn-outline btn-primary ml-4"
+                disabled={tableData.length === 0}
+              >
+                📊 Export CSV
+              </button>
             </div>
             <div className="overflow-x-auto">
               {tableData.length > 0 ? (
@@ -533,6 +579,14 @@ function MonthEndInventory() {
                   No data to display.
                 </div>
               )}
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={handleExportCSV}
+                className="btn btn-primary w-full"
+              >
+                Export CSV
+              </button>
             </div>
           </div>
         </div>

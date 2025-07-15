@@ -29,6 +29,7 @@ function App() {
     price: "",
     qcFlaw: "none",
     manualRef: "", // <-- change from serialNumber to manualRef
+    mfr: "",
   });  const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
@@ -296,10 +297,10 @@ function App() {
         ...newProduct,
         sessionId,
       });
-      setMessage("Product added!");
+      setMessage(res.data.message || "Product added to inventory and month end collections!");
       setShowNewProductForm(false);
-      setPrice(Number(newProduct.price));
-      setTotalPrice((prev) => prev + Number(newProduct.price));
+      setPrice(res.data.price || Number(newProduct.price));
+      setTotalPrice((prev) => prev + (res.data.price || Number(newProduct.price)));
       setNewProduct({
         barcode: "",
         description: "",
@@ -307,6 +308,7 @@ function App() {
         price: "",
         qcFlaw: "none",
         manualRef: "", // <-- change from serialNumber to manualRef
+        mfr: "",
       });
       setQcFlaw("none"); // <-- Add this line
     } catch (err) {
