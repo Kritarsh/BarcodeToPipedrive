@@ -19,7 +19,9 @@ function App() {
   const [qcFlaw, setQcFlaw] = useState("none");
   const [price, setPrice] = useState(null);
   const [totalPrice, setTotalPrice] = useState(0);
-  const [requireSerial, setRequireSerial] = useState(false);  const [serialNumber, setSerialNumber] = useState("");
+  const [quantity, setQuantity] = useState(1);
+  const [requireSerial, setRequireSerial] = useState(false);
+  const [serialNumber, setSerialNumber] = useState("");
   const [selectedMachine, setSelectedMachine] = useState("");
   const [showNewProductForm, setShowNewProductForm] = useState(false);
   const [newProduct, setNewProduct] = useState({
@@ -30,7 +32,9 @@ function App() {
     qcFlaw: "none",
     manualRef: "", // <-- change from serialNumber to manualRef
     mfr: "",
-  });  const skuInputRef = useRef(null);
+  });
+  const [scannedItems, setScannedItems] = useState([]);
+  const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
 
@@ -59,7 +63,9 @@ function App() {
 
   const setSkuInputAndFocus = (el) => {
     skuInputRef.current = el;
-    if (el && !showManualRef) el.focus();
+    if (el && !showManualRef && !showNewProductForm && document.activeElement?.type !== 'number') {
+      el.focus();
+    }
   };
 
   // Fetch MongoDB data
@@ -84,12 +90,12 @@ function App() {
     }
   }, [dealFound]);
   useEffect(() => {
-    if (dealFound) {
+    if (dealFound && !showManualRef && !showNewProductForm) {
       setTimeout(() => {
         if (skuInputRef.current) skuInputRef.current.focus();
       }, 0);
     }
-  }, [dealFound, sku]);
+  }, [dealFound, showManualRef, showNewProductForm]);
   useEffect(() => {
     if (showManualRef && manualRefInputRef.current) {
       manualRefInputRef.current.focus();
@@ -152,16 +158,30 @@ function App() {
           barcode: selectedMachine,
           sessionId,
           qcFlaw,
+          quantity,
           serialNumber: sku, // sku field is used for serial number here
         });
         setSpreadsheetMatch(res.data.spreadsheetMatch);
         setMessage("Machine added and note attached!");
         setPrice(res.data.price);
         if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
-          setTotalPrice((prev) => prev + res.data.price);
+          setTotalPrice((prev) => prev + (res.data.price * quantity));
         }
+        
+        // Add to scannedItems
+        setScannedItems((prev) => [...prev, {
+          upc: selectedMachine,
+          description: selectedMachine,
+          price: res.data.price,
+          qcFlaw: qcFlaw,
+          serialNumber: sku, // sku field is used for serial number here
+          quantity: quantity,
+          isMachine: true
+        }]);
+        
         setSelectedMachine("");
         setSku("");
+        setQuantity(1);
         setQcFlaw("none"); // <-- Add this line
         return;
       }
@@ -172,6 +192,7 @@ function App() {
         barcode: sku,
         sessionId,
         qcFlaw,
+        quantity,
       });
       const nameForSerialCheck =
         (res.data.row &&
@@ -214,12 +235,25 @@ function App() {
             manualRefInputRef.current.focus();
           }
         }, 0);
+      } else {
+        // Add to scannedItems for successful UPC scans
+        setScannedItems((prev) => [...prev, {
+          upc: sku,
+          description: res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || sku,
+          price: res.data.price,
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber,
+          quantity: quantity
+        }]);
+        
+        // Only reset quantity if the scan was successful
+        setQuantity(1);
       }
       setSku("");
       setPrice(res.data.price);
 
       if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
-        setTotalPrice((prev) => prev + res.data.price);
+        setTotalPrice((prev) => prev + (res.data.price * quantity));
       }
     } catch (err) {
       setMessage(err.response?.data?.error || "Error checking SKU.");
@@ -251,9 +285,36 @@ function App() {
         sessionId,
         description,
         price,
+        quantity,
         serialNumber,
         qcFlaw,
       });
+      
+      // Check if the manual reference was successful
+      if (retryRes.data.match === false) {
+        // Manual reference failed, show new product form
+        setMessage("SKU not found even with the manual reference.");
+        setShowNewProductForm(true);
+        setNewProduct({
+          ...newProduct,
+          barcode: pendingSku,
+          manualRef: manualRef,
+          qcFlaw,
+        });
+        return;
+      }
+      
+      // Add to scannedItems for successful manual reference
+      setScannedItems((prev) => [...prev, {
+        upc: pendingSku,
+        description: retryRes.data.descriptionResult?.description || pendingSku,
+        price: retryRes.data.price,
+        qcFlaw: qcFlaw,
+        serialNumber: serialNumber,
+        quantity: quantity,
+        manualRef: manualRef
+      }]);
+      
       setSpreadsheetMatch(retryRes.data.spreadsheetMatch);
       setMessage(
         retryRes.data.spreadsheetMatch
@@ -265,12 +326,14 @@ function App() {
       setShowManualRef(false);
       setManualRef("");
       setPendingSku("");
+      setQuantity(1);
       setDescriptionResult(retryRes.data.descriptionResult);
       setPrice(retryRes.data.price);
       if (qcFlaw !== "flaw" && !isNaN(retryRes.data.price)) {
-        setTotalPrice((prev) => prev + retryRes.data.price);
+        setTotalPrice((prev) => prev + (retryRes.data.price * quantity));
       }
       setQcFlaw("none"); // <-- Add this line
+      setSerialNumber(""); // Clear serial number
       setTimeout(() => {
         if (skuInputRef.current) {
           skuInputRef.current.focus();
@@ -284,7 +347,7 @@ function App() {
       setNewProduct({
         ...newProduct,
         barcode: pendingSku,
-        serialNumber,
+        manualRef: manualRef,
         qcFlaw,
       });
     }
@@ -295,12 +358,27 @@ function App() {
     try {
       const res = await axios.post(`${apiUrl}/api/product/new`, {
         ...newProduct,
+        quantity,
         sessionId,
       });
       setMessage(res.data.message || "Product added to inventory and month end collections!");
       setShowNewProductForm(false);
+      setQuantity(1);
       setPrice(res.data.price || Number(newProduct.price));
-      setTotalPrice((prev) => prev + (res.data.price || Number(newProduct.price)));
+      setTotalPrice((prev) => prev + ((res.data.price || Number(newProduct.price)) * quantity));
+      
+      // Add to scannedItems
+      setScannedItems((prev) => [...prev, {
+        upc: newProduct.barcode,
+        description: newProduct.description,
+        price: res.data.price || Number(newProduct.price),
+        qcFlaw: newProduct.qcFlaw,
+        serialNumber: serialNumber,
+        quantity: quantity,
+        manualRef: newProduct.manualRef,
+        isNewProduct: true
+      }]);
+      
       setNewProduct({
         barcode: "",
         description: "",
@@ -311,6 +389,10 @@ function App() {
         mfr: "",
       });
       setQcFlaw("none"); // <-- Add this line
+      setSerialNumber(""); // Clear serial number
+      setShowManualRef(false); // Clear manual ref form
+      setManualRef(""); // Clear manual ref
+      setPendingSku(""); // Clear pending SKU
     } catch (err) {
       setMessage(err.response?.data?.error || "Failed to add new product.");
     }
@@ -324,26 +406,57 @@ function App() {
     }
 
     try {
-      setMessage("Undoing last scan...");
+      setMessage("Processing undo...");
       const res = await axios.post(`${apiUrl}/api/barcode/undo`, {
         sessionId
       });
       
-      // Update the total price by subtracting the undone item's price
-      const undonePriceValue = Number(res.data.undoneItem.price) || 0;
-      if (res.data.undoneItem.qcFlaw !== "flaw") {
-        setTotalPrice(prev => Math.max(0, prev - undonePriceValue));
+      if (res.data.action === "clearPendingState") {
+        // Handle clearing pending states (manual ref or new product forms)
+        if (res.data.pendingType === "manualReference") {
+          setShowManualRef(false);
+          setManualRef("");
+          setPendingSku("");
+          setSku("");
+          setMessage(`Cancelled manual reference for: ${res.data.clearedSku}`);
+        } else if (res.data.pendingType === "newProduct") {
+          setShowNewProductForm(false);
+          setShowManualRef(false);
+          setManualRef("");
+          setPendingSku("");
+          setSku("");
+          setNewProduct({
+            barcode: "",
+            description: "",
+            size: "",
+            price: "",
+            qcFlaw: "none",
+            manualRef: "",
+            mfr: "",
+          });
+          setMessage(`Cancelled new product form for: ${res.data.clearedSku}`);
+        }
+      } else if (res.data.action === "undoLastScan") {
+        // Handle undoing completed scans
+        const undonePriceValue = Number(res.data.undoneItem.price) || 0;
+        const undoneQuantity = Number(res.data.undoneItem.quantity) || 1;
+        if (res.data.undoneItem.qcFlaw !== "flaw") {
+          setTotalPrice(prev => Math.max(0, prev - (undonePriceValue * undoneQuantity)));
+        }
+        
+        // Remove from scannedItems list
+        setScannedItems(prev => prev.slice(0, -1));
+        
+        setMessage(`Undone: ${res.data.undoneItem.description} (${res.data.remainingItems} items remaining)`);
       }
-      
-      setMessage(`Undone: ${res.data.undoneItem.description} (${res.data.remainingItems} items remaining)`);
       
       // Clear any current form state
       setSku("");
-      setShowManualRef(false);
-      setManualRef("");
-      setPendingSku("");
       setPrice(null);
       setDescriptionResult("");
+      setQcFlaw("none");
+      setSerialNumber("");
+      setQuantity(1);
       
     } catch (err) {
       setMessage(err.response?.data?.error || "Failed to undo last scan");
@@ -410,6 +523,8 @@ function App() {
                 showManualRef={showManualRef}
                 qcFlaw={qcFlaw}
                 setQcFlaw={setQcFlaw}
+                quantity={quantity}
+                setQuantity={setQuantity}
               />              {showManualRef && (
                 <ManualRefForm
                   manualRef={manualRef}
@@ -443,6 +558,7 @@ function App() {
                   setDealFound(false);
                   setTrackingNumber("");
                   setSku("");
+                  setQuantity(1);
                   setShowManualRef(false);
                   setManualRef("");
                   setPendingSku("");
@@ -451,6 +567,7 @@ function App() {
                   setDescriptionResult("");
                   setPrice(null);
                   setTotalPrice(0);
+                  setScannedItems([]);
                 }}
               >
                 Start New Tracking Number
@@ -487,6 +604,32 @@ function App() {
           {typeof totalPrice === "number" && !isNaN(totalPrice) && (
             <div className="alert alert-info text-center mb-2">
               Total Price: ${totalPrice.toFixed(2)}
+            </div>
+          )}
+          
+          {/* Scanned Items Summary */}
+          {scannedItems.length > 0 && (
+            <div className="mb-4">
+              <h3 className="font-bold mb-2">
+                Scanned Items ({scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items)
+              </h3>
+              <div className="max-h-40 overflow-y-auto">
+                {scannedItems.map((item, index) => (
+                  <div key={index} className="text-sm mb-1">
+                    {item.description}
+                    {item.quantity && item.quantity > 1 ? ` (x${item.quantity})` : ""}
+                    {item.isMachine && item.serialNumber ? ` Serial: ${item.serialNumber}` : ""}
+                    {item.manualRef ? ` Ref: ${item.manualRef}` : ""}
+                    {item.isNewProduct ? " (New)" : ""}
+                    {item.qcFlaw && item.qcFlaw !== "none" ? ` [${item.qcFlaw}]` : ""}
+                    - ${item.price}
+                    {item.quantity && item.quantity > 1 ? ` (Total: $${(item.price * item.quantity).toFixed(2)})` : ""}
+                  </div>
+                ))}
+              </div>
+              <div className="font-bold mt-2">
+                Total: ${scannedItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0).toFixed(2)}
+              </div>
             </div>
           )}
           

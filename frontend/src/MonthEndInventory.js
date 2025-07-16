@@ -35,6 +35,7 @@ function MonthEndInventory() {
     mfr: "",
   });
   const [scannedItems, setScannedItems] = useState([]);
+  const [quantity, setQuantity] = useState(1);
   const skuInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
 
@@ -132,11 +133,12 @@ function MonthEndInventory() {
           sessionId,
           qcFlaw,
           serialNumber,
+          quantity,
         });
 
         setMessage(res.data.message);
         setPrice(res.data.price);
-        setTotalPrice((prev) => prev + res.data.price);
+        setTotalPrice((prev) => prev + (res.data.price * quantity));
 
         // Add to scannedItems
         setScannedItems((prev) => [...prev, {
@@ -144,12 +146,14 @@ function MonthEndInventory() {
           description: sku,
           price: res.data.price,
           qcFlaw: qcFlaw,
-          serialNumber: serialNumber
+          serialNumber: serialNumber,
+          quantity: quantity
         }]);
 
         setSku("");
         setQcFlaw("none");
         setSerialNumber("");
+        setQuantity(1);
 
         // Refresh the month end data to show the new item
         refreshMonthEndData();
@@ -163,6 +167,7 @@ function MonthEndInventory() {
         sessionId,
         qcFlaw,
         serialNumber,
+        quantity,
       });
 
       if (res.data.match === false) {
@@ -176,7 +181,7 @@ function MonthEndInventory() {
       setSpreadsheetMatch(res.data.spreadsheetMatch);
       setDescriptionResult(res.data.descriptionResult);
       setPrice(res.data.price);
-      setTotalPrice((prev) => prev + res.data.price);
+      setTotalPrice((prev) => prev + (res.data.price * quantity));
 
       // Add to scannedItems
       setScannedItems((prev) => [...prev, {
@@ -184,12 +189,14 @@ function MonthEndInventory() {
         description: res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || sku,
         price: res.data.price,
         qcFlaw: qcFlaw,
-        serialNumber: serialNumber
+        serialNumber: serialNumber,
+        quantity: quantity
       }]);
 
       setSku("");
       setQcFlaw("none");
       setSerialNumber("");
+      setQuantity(1);
 
       // Refresh the month end data to show the new item
       refreshMonthEndData();
@@ -209,6 +216,7 @@ function MonthEndInventory() {
         sessionId,
         qcFlaw,
         serialNumber,
+        quantity,
       });
 
       if (res.data.match) {
@@ -216,7 +224,7 @@ function MonthEndInventory() {
         setSpreadsheetMatch(res.data.spreadsheetMatch);
         setDescriptionResult(res.data.descriptionResult);
         setPrice(res.data.price);
-        setTotalPrice((prev) => prev + res.data.price);
+        setTotalPrice((prev) => prev + (res.data.price * quantity));
 
         // Add to scannedItems
         setScannedItems((prev) => [...prev, {
@@ -224,7 +232,8 @@ function MonthEndInventory() {
           description: res.data.descriptionResult?.description || pendingSku,
           price: res.data.price,
           qcFlaw: qcFlaw,
-          serialNumber: serialNumber
+          serialNumber: serialNumber,
+          quantity: quantity
         }]);
 
         setShowManualRef(false);
@@ -233,6 +242,7 @@ function MonthEndInventory() {
         setSku("");
         setQcFlaw("none");
         setSerialNumber("");
+        setQuantity(1);
 
         // Refresh the month end data to show the new item
         refreshMonthEndData();
@@ -261,10 +271,11 @@ function MonthEndInventory() {
         ...newProduct,
         sessionId,
         serialNumber,
+        quantity,
       });
 
       setMessage(res.data.message);
-      setTotalPrice((prev) => prev + (Number(newProduct.price) || 0));
+      setTotalPrice((prev) => prev + ((Number(newProduct.price) || 0) * quantity));
 
       // Add to scannedItems
       setScannedItems((prev) => [...prev, {
@@ -272,7 +283,8 @@ function MonthEndInventory() {
         description: newProduct.description,
         price: Number(newProduct.price) || 0,
         qcFlaw: newProduct.qcFlaw,
-        serialNumber: serialNumber
+        serialNumber: serialNumber,
+        quantity: quantity
       }]);
 
       setShowNewProductForm(false);
@@ -327,6 +339,67 @@ function MonthEndInventory() {
       console.log("Month End inventory completed and session reset");
     } catch (err) {
       setMessage(err.response?.data?.error || "Failed to complete month end inventory.");
+    }
+  };
+
+  // Add undo function
+  const handleUndo = async () => {
+    try {
+      setMessage("Processing undo...");
+      const res = await axios.post(`${apiUrl}/api/barcode/undo`, {
+        sessionId
+      });
+      
+      if (res.data.action === "clearPendingState") {
+        // Handle clearing pending states (manual ref or new product forms)
+        if (res.data.pendingType === "manualReference") {
+          setShowManualRef(false);
+          setManualRef("");
+          setPendingSku("");
+          setSku("");
+          setMessage(`Cancelled manual reference for: ${res.data.clearedSku}`);
+        } else if (res.data.pendingType === "newProduct") {
+          setShowNewProductForm(false);
+          setShowManualRef(false);
+          setManualRef("");
+          setPendingSku("");
+          setSku("");
+          setNewProduct({
+            barcode: "",
+            description: "",
+            size: "",
+            price: "",
+            qcFlaw: "none",
+            manualRef: "",
+            mfr: "",
+          });
+          setMessage(`Cancelled new product form for: ${res.data.clearedSku}`);
+        }
+      } else if (res.data.action === "undoLastScan") {
+        // Handle undoing completed scans
+        const undonePriceValue = Number(res.data.undoneItem.price) || 0;
+        const undoneQuantity = Number(res.data.undoneItem.quantity) || 1;
+        setTotalPrice(prev => Math.max(0, prev - (undonePriceValue * undoneQuantity)));
+        
+        // Remove from scannedItems list
+        setScannedItems(prev => prev.slice(0, -1));
+        
+        setMessage(`Undone: ${res.data.undoneItem.description} (${res.data.remainingItems} items remaining)`);
+      }
+      
+      // Clear any current form state
+      setSku("");
+      setPrice(null);
+      setDescriptionResult("");
+      setQcFlaw("none");
+      setSerialNumber("");
+      setQuantity(1);
+      
+      // Refresh the month end data to reflect changes
+      refreshMonthEndData();
+      
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to undo last scan");
     }
   };
 
@@ -402,6 +475,8 @@ function MonthEndInventory() {
             showManualRef={showManualRef}
             qcFlaw={qcFlaw}
             setQcFlaw={setQcFlaw}
+            quantity={quantity}
+            setQuantity={setQuantity}
           />
 
           {showManualRef && (
@@ -414,6 +489,14 @@ function MonthEndInventory() {
               setQcFlaw={setQcFlaw}
             />
           )}
+
+          {/* Add the Undo Button */}
+          <button
+            className="btn btn-warning w-full mb-4"
+            onClick={handleUndo}
+          >
+            ↶ Undo Last Scan
+          </button>
 
           {showNewProductForm && (
             <form onSubmit={handleNewProductSubmit} className="mb-6">
@@ -493,15 +576,22 @@ function MonthEndInventory() {
 
           {scannedItems.length > 0 && (
             <div className="mb-4">
-              <h3 className="font-bold mb-2">Scanned Items ({scannedItems.length})</h3>
+              <h3 className="font-bold mb-2">
+                Scanned Items ({scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items)
+              </h3>
               <div className="max-h-40 overflow-y-auto">
                 {scannedItems.map((item, index) => (
                   <div key={index} className="text-sm mb-1">
-                    {item.description} - ${item.price}
+                    {item.description}
+                    {item.quantity && item.quantity > 1 ? ` (x${item.quantity})` : ""} 
+                    - ${item.price}
+                    {item.quantity && item.quantity > 1 ? ` (Total: $${(item.price * item.quantity).toFixed(2)})` : ""}
                   </div>
                 ))}
               </div>
-              <div className="font-bold mt-2">Total: ${totalPrice.toFixed(2)}</div>
+              <div className="font-bold mt-2">
+                Total: ${scannedItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0).toFixed(2)}
+              </div>
               <button
                 onClick={handleFinishMonthEnd}
                 className="btn btn-success w-full mt-2"

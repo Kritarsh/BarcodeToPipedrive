@@ -8,6 +8,8 @@ function SkuForm({
   showManualRef,
   qcFlaw,
   setQcFlaw,
+  quantity,
+  setQuantity,
 }) {
   return (
     <form onSubmit={handleSkuSubmit} className="mb-6">
@@ -21,6 +23,18 @@ function SkuForm({
           ref={setSkuInputAndFocus}
           className="input input-bordered w-full mt-1"
           placeholder="Scan or enter UPC"
+        />
+      </label>
+      <label className="block mb-2 font-medium text-base-content">
+        Quantity:
+        <input
+          type="number"
+          min="1"
+          value={quantity}
+          onChange={(e) => setQuantity(Number(e.target.value))}
+          className="input input-bordered w-full mt-1"
+          placeholder="Enter quantity"
+          required
         />
       </label>
       <label className="block mb-2 font-medium text-base-content">

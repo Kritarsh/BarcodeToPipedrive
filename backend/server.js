@@ -135,7 +135,7 @@ function qcFlawLabel(value) {
 
 // Barcode scan handler
 app.post("/api/barcode", async (req, res) => {
-  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw } =
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1 } =
     req.body;
   if (!scanType || !barcode || !sessionId) {
     return res
@@ -167,8 +167,8 @@ app.post("/api/barcode", async (req, res) => {
           if (!grouped[key]) {
             grouped[key] = { ...entry, count: 0, subtotal: 0 };
           }
-          grouped[key].count += 1;
-          grouped[key].subtotal += Number(entry.price) || 0;
+          grouped[key].count += (entry.quantity || 1);
+          grouped[key].subtotal += (Number(entry.price) || 0) * (entry.quantity || 1);
         }
 
         // Build summary strings with subtotals
@@ -184,7 +184,7 @@ app.post("/api/barcode", async (req, res) => {
 
         const total =
           oldSession.skuEntries.reduce(
-            (sum, entry) => sum + (Number(entry.price) || 0),
+            (sum, entry) => sum + (Number(entry.price) || 0) * (entry.quantity || 1),
             0
           ) || 0;
 
@@ -273,6 +273,7 @@ app.post("/api/barcode", async (req, res) => {
           qcFlaw: qcFlaw,
           serialNumber: serialNumber || "",
           price: machinePrice,
+          quantity: quantity, // Add quantity to machine entry
           isMachine: true,
         });
 
@@ -291,6 +292,16 @@ app.post("/api/barcode", async (req, res) => {
       // Only now do the UPC lookup for supplies
       const result = await matchSkuWithDatabase(barcode);
       if (!result.match) {
+        // Set pending state for manual reference
+        currentSession.pendingState = {
+          type: "manualReference",
+          sku: barcode,
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber,
+          quantity: quantity
+        };
+        await setSession(sessionId, currentSession);
+        
         return res.json({
           match: false,
           reason: result.reason,
@@ -309,7 +320,7 @@ app.post("/api/barcode", async (req, res) => {
           name,
           upc,
           size,
-          quantity: 1,
+          quantity: quantity,
           date: new Date(),
         });
       } else {
@@ -339,6 +350,7 @@ app.post("/api/barcode", async (req, res) => {
         qcFlaw: req.body.qcFlaw,
         serialNumber: serialNumber || "",
         price: calculatedPrice,
+        quantity: quantity, // Add quantity to session entry
         collection: result.collection, // Add this for undo functionality
         upc: barcode, // Add this for undo functionality
       });
@@ -355,7 +367,7 @@ app.post("/api/barcode", async (req, res) => {
           MFR: result.row.MFR || result.collection
         },
         {
-          $inc: { Quantity: 1 },
+          $inc: { Quantity: quantity },
           $setOnInsert: { RefNum: "" }, // Only set on insert
           $set: { 
             Date: new Date(),
@@ -416,6 +428,7 @@ app.post("/api/barcode/manual", async (req, res) => {
     price,
     serialNumber,
     qcFlaw,
+    quantity = 1,
   } = req.body;
   if (!barcode || !manualRef || !sessionId) {
     return res
@@ -427,6 +440,11 @@ app.post("/api/barcode/manual", async (req, res) => {
   const matchResult = await matchSkuWithDatabaseManual(barcode, manualRef);
 
   if (matchResult.match) {
+    // Clear pending state since we found a match
+    if (currentSession.pendingState) {
+      delete currentSession.pendingState;
+    }
+    
     let nameForPricing =
       (matchResult.row &&
         (matchResult.row.Name ||
@@ -467,6 +485,7 @@ app.post("/api/barcode/manual", async (req, res) => {
       qcFlaw: qcFlaw,
       serialNumber: serialNumber || "",
       price: calculatedPrice,
+      quantity: quantity, // Add quantity to manual reference entry
     });
 
     await setSession(sessionId, currentSession);
@@ -481,7 +500,7 @@ app.post("/api/barcode/manual", async (req, res) => {
         MFR: matchResult.row.MFR || matchResult.collection
       },
       {
-        $inc: { Quantity: 1 },
+        $inc: { Quantity: quantity },
         $set: { 
           UPC: barcode,
           Date: new Date(),
@@ -528,15 +547,88 @@ app.post("/api/barcode/manual", async (req, res) => {
   }
 
   // If no match, return a response so frontend can prompt for new product
+  // Set pending state for new product form
+  currentSession.pendingState = {
+    type: "newProduct",
+    sku: barcode,
+    manualRef: manualRef,
+    qcFlaw: qcFlaw,
+    serialNumber: serialNumber,
+    quantity: quantity
+  };
+  await setSession(sessionId, currentSession);
+  
   return res.json({
     match: false,
     message: "SKU not found even with the manual reference.",
   });
 });
 
+// Undo last scan
+app.post("/api/barcode/undo", async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
+  try {
+    const currentSession = await getSession(sessionId);
+    
+    if (!currentSession) {
+      return res.status(400).json({ error: "No session found" });
+    }
+
+    // Check for pending states first (manual reference, new product forms)
+    if (currentSession.pendingState) {
+      const pendingState = currentSession.pendingState;
+      
+      // Clear the pending state
+      delete currentSession.pendingState;
+      await setSession(sessionId, currentSession);
+      
+      return res.json({
+        message: "Cancelled pending operation",
+        action: "clearPendingState",
+        pendingType: pendingState.type,
+        clearedSku: pendingState.sku || null,
+        remainingItems: currentSession.skuEntries ? currentSession.skuEntries.length : 0
+      });
+    }
+
+    // If no pending state, handle normal undo of completed scans
+    if (!currentSession.skuEntries || currentSession.skuEntries.length === 0) {
+      return res.status(400).json({ error: "No items to undo" });
+    }
+
+    // Remove the last item from the session
+    const undoneItem = currentSession.skuEntries.pop();
+    
+    // Also remove from noteContent and prices if they exist
+    if (currentSession.noteContent && currentSession.noteContent.length > 0) {
+      currentSession.noteContent.pop();
+    }
+    if (currentSession.prices && currentSession.prices.length > 0) {
+      currentSession.prices.pop();
+    }
+
+    // Save the updated session
+    await setSession(sessionId, currentSession);
+
+    return res.json({
+      message: "Last scan undone successfully",
+      action: "undoLastScan",
+      undoneItem: undoneItem,
+      remainingItems: currentSession.skuEntries.length
+    });
+  } catch (err) {
+    console.error("Error undoing last scan:", err);
+    return res.status(500).json({ error: "Failed to undo last scan" });
+  }
+});
+
 // Add new product to main inventory/overstock and Month End collections
 app.post("/api/product/new", async (req, res) => {
-  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr } = req.body;
+  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr, quantity = 1 } = req.body;
   if (!barcode || !description || !sessionId) {
     return res.status(400).json({ error: "barcode, description, and sessionId are required" });
   }
@@ -576,7 +668,7 @@ app.post("/api/product/new", async (req, res) => {
 
     // Also save to corresponding Month End collection with calculated price - use appropriate primary key
     const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
-    await monthEndCollection.findOneAndUpdate(
+    const monthEndProduct = await monthEndCollection.findOneAndUpdate(
       {
         // Use RefNum as primary key if provided, otherwise use UPC
         ...(manualRef ? 
@@ -585,8 +677,8 @@ app.post("/api/product/new", async (req, res) => {
         )
       },
       {
+        $inc: { Quantity: quantity },
         $setOnInsert: { 
-          Quantity: 0,
           ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
         },
         $set: { 
@@ -604,6 +696,12 @@ app.post("/api/product/new", async (req, res) => {
 
     // Add to session
     const currentSession = await getSession(sessionId);
+    
+    // Clear pending state since we're successfully adding the product
+    if (currentSession.pendingState) {
+      delete currentSession.pendingState;
+    }
+    
     if (!currentSession.skuEntries) currentSession.skuEntries = [];
     currentSession.skuEntries.push({
       description,
@@ -611,6 +709,7 @@ app.post("/api/product/new", async (req, res) => {
       qcFlaw: qcFlaw || "none",
       serialNumber: "",
       price: calculatedPrice,
+      quantity: quantity, // Add quantity field
       isManual: true,
       upc: barcode,
       collection: isInventoryItem ? "Inventory" : "Overstock",
@@ -799,7 +898,7 @@ app.get("/api/month-end-overstock/export-csv", async (req, res) => {
 // Month End barcode scan handler
 app.post("/api/month-end/barcode", async (req, res) => {
   console.log("🔥 MONTH END BARCODE HANDLER HIT!", req.body);
-  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw } = req.body;
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1 } = req.body;
   if (!scanType || !barcode || !sessionId) {
     return res.status(400).json({ error: "scanType, barcode, and sessionId are required" });
   }
@@ -843,6 +942,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
           qcFlaw: qcFlaw,
           serialNumber: serialNumber || "",
           price: machinePrice,
+          quantity: quantity, // Add quantity field
           isMachine: true,
           upc: barcode,
           name: barcode,
@@ -886,6 +986,16 @@ app.post("/api/month-end/barcode", async (req, res) => {
       // Process supplies for month end
       const result = await matchSkuWithDatabase(barcode);
       if (!result.match) {
+        // Set pending state for manual reference
+        currentSession.pendingState = {
+          type: "manualReference",
+          sku: barcode,
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber,
+          quantity: quantity
+        };
+        await setSession(sessionId, currentSession);
+        
         return res.json({
           match: false,
           reason: result.reason,
@@ -918,6 +1028,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
         qcFlaw: req.body.qcFlaw,
         serialNumber: serialNumber || "",
         price: calculatedPrice,
+        quantity: quantity, // Add quantity field
         collection: result.collection,
         upc: barcode,
         name: name,
@@ -934,7 +1045,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
           MFR: result.row.MFR || result.collection
         },
         {
-          $inc: { Quantity: 1 },
+          $inc: { Quantity: quantity },
           $setOnInsert: { RefNum: "" }, // Only set on insert
           $set: { 
             Date: new Date(),
@@ -987,7 +1098,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
 // Month End manual reference handler
 app.post("/api/month-end/barcode/manual", async (req, res) => {
   console.log("🔥 MONTH END MANUAL REFERENCE HANDLER HIT!", req.body);
-  const { barcode, manualRef, sessionId, description, price, serialNumber, qcFlaw } = req.body;
+  const { barcode, manualRef, sessionId, description, price, serialNumber, qcFlaw, quantity = 1 } = req.body;
   if (!barcode || !manualRef || !sessionId) {
     return res.status(400).json({ error: "barcode, manualRef, and sessionId are required" });
   }
@@ -996,6 +1107,11 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
   const matchResult = await matchSkuWithDatabaseManual(barcode, manualRef);
 
   if (matchResult.match) {
+    // Clear pending state since we found a match
+    if (currentSession.pendingState) {
+      delete currentSession.pendingState;
+    }
+    
     let nameForPricing = (matchResult.row && (matchResult.row.Name || matchResult.row.Description || matchResult.row.Style)) || "";
     let calculatedPrice = 0;
     calculatedPrice = await getPriceForName(nameForPricing, qcFlaw);
@@ -1013,6 +1129,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       qcFlaw: qcFlaw,
       serialNumber: serialNumber || "",
       price: calculatedPrice,
+      quantity: quantity, // Add quantity field
       upc: barcode,
     });
 
@@ -1026,7 +1143,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
         MFR: matchResult.row.MFR || matchResult.collection
       },
       {
-        $inc: { Quantity: 1 },
+        $inc: { Quantity: quantity },
         $set: { 
           UPC: barcode,
           Date: new Date(),
@@ -1066,6 +1183,17 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
   }
 
   // If no match, return a response so frontend can prompt for new product
+  // Set pending state for new product form
+  currentSession.pendingState = {
+    type: "newProduct",
+    sku: barcode,
+    manualRef: manualRef,
+    qcFlaw: qcFlaw,
+    serialNumber: serialNumber,
+    quantity: quantity
+  };
+  await setSession(sessionId, currentSession);
+  
   return res.json({
     match: false,
     message: "SKU not found even with the manual reference.",
@@ -1074,7 +1202,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
 
 // Month End new product handler
 app.post("/api/month-end/product/new", async (req, res) => {
-  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, serialNumber, mfr } = req.body;
+  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, serialNumber, mfr, quantity = 1 } = req.body;
   if (!barcode || !description || !sessionId) {
     return res.status(400).json({ error: "barcode, description, and sessionId are required" });
   }
@@ -1093,7 +1221,7 @@ app.post("/api/month-end/product/new", async (req, res) => {
         )
       },
       {
-        $inc: { Quantity: 1 },
+        $inc: { Quantity: quantity },
         $setOnInsert: { 
           ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
         },
@@ -1111,6 +1239,12 @@ app.post("/api/month-end/product/new", async (req, res) => {
     );
 
     const currentSession = await getSession(sessionId);
+    
+    // Clear pending state since we're successfully adding the product
+    if (currentSession.pendingState) {
+      delete currentSession.pendingState;
+    }
+    
     if (!currentSession.skuEntries) currentSession.skuEntries = [];
     currentSession.skuEntries.push({
       description,
@@ -1118,6 +1252,7 @@ app.post("/api/month-end/product/new", async (req, res) => {
       qcFlaw: qcFlaw || "none",
       serialNumber: serialNumber || "",
       price: price || 0,
+      quantity: quantity, // Add quantity field
       isManual: true,
       upc: barcode,
     });
