@@ -357,7 +357,7 @@ app.post("/api/barcode", async (req, res) => {
 
       await setSession(sessionId, currentSession);
 
-      // Also save to Month End collection when UPC is scanned - increment if exists (UPC as primary key)
+      // Also save to Month End collection when UPC is scanned - just update info, don't increment quantity
       const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
       await monthEndCollection.findOneAndUpdate(
         {
@@ -367,8 +367,10 @@ app.post("/api/barcode", async (req, res) => {
           MFR: result.row.MFR || result.collection
         },
         {
-          $inc: { Quantity: quantity },
-          $setOnInsert: { RefNum: "" }, // Only set on insert
+          $setOnInsert: { 
+            RefNum: "",
+            Quantity: 0 // Set to 0 for new items from regular workflow
+          },
           $set: { 
             Date: new Date(),
             Price: calculatedPrice
@@ -490,7 +492,7 @@ app.post("/api/barcode/manual", async (req, res) => {
 
     await setSession(sessionId, currentSession);
 
-    // Also save to corresponding Month End collection with calculated price - increment if exists (RefNum as primary key)
+    // Also save to corresponding Month End collection with calculated price - just update info, don't increment quantity
     const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
     await monthEndCollection.findOneAndUpdate(
       {
@@ -500,7 +502,9 @@ app.post("/api/barcode/manual", async (req, res) => {
         MFR: matchResult.row.MFR || matchResult.collection
       },
       {
-        $inc: { Quantity: quantity },
+        $setOnInsert: { 
+          Quantity: 0 // Set to 0 for new items from regular workflow
+        },
         $set: { 
           UPC: barcode,
           Date: new Date(),
@@ -666,7 +670,7 @@ app.post("/api/product/new", async (req, res) => {
     
     await newProduct.save();
 
-    // Also save to corresponding Month End collection with calculated price - use appropriate primary key
+    // Also save to corresponding Month End collection with calculated price - just update info, don't increment quantity
     const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
     const monthEndProduct = await monthEndCollection.findOneAndUpdate(
       {
@@ -677,9 +681,9 @@ app.post("/api/product/new", async (req, res) => {
         )
       },
       {
-        $inc: { Quantity: quantity },
         $setOnInsert: { 
-          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
+          ...(manualRef ? {} : { RefNum: "" }), // Only set RefNum to "" on insert when no manualRef
+          Quantity: 0 // Set to 0 for new items from regular workflow
         },
         $set: { 
           UPC: barcode,
