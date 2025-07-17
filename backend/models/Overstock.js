@@ -8,6 +8,7 @@ const overstockSchema = new mongoose.Schema({
   Size: { type: String },
   Quantity: { type: Number, default: 0 },
   Date: { type: Date, default: Date.now },
+  Price: { type: Number, default: 0 },
 });
 
 export default mongoose.model("Overstock", overstockSchema);

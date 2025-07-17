@@ -13,6 +13,7 @@ import {
   writeUPCToMongoDB,
   returnProductDescription,
   getPriceForName,
+  getPriceFromDatabase,
   appendMachineSpecific,
   incrementSupplyQuantity,
 } from "./skuMatcher.js";
@@ -328,7 +329,7 @@ app.post("/api/barcode", async (req, res) => {
       }
 
       let calculatedPrice = 0;
-      calculatedPrice = await getPriceForName(name, qcFlaw);
+      calculatedPrice = await getPriceFromDatabase(result.row, name, qcFlaw);
 
       const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
         result.collection
@@ -454,7 +455,7 @@ app.post("/api/barcode/manual", async (req, res) => {
           matchResult.row.Style)) ||
       "";
     let calculatedPrice = 0;
-    calculatedPrice = await getPriceForName(nameForPricing, qcFlaw);
+    calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
     const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
       matchResult.file
@@ -641,8 +642,8 @@ app.post("/api/product/new", async (req, res) => {
     // Determine which collection to use based on manufacturer
     const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
     
-    // Calculate price using existing pricing logic
-    const calculatedPrice = await getPriceForName(description, qcFlaw);
+    // Calculate price using existing pricing logic or provided price
+    const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
     
     // Save to main collection
     let newProduct;
@@ -655,6 +656,7 @@ app.post("/api/product/new", async (req, res) => {
         MFR: mfr,
         Quantity: 0, // Start with 0 as requested
         Date: new Date(),
+        Price: calculatedPrice,
       });
     } else {
       newProduct = new Overstock({
@@ -665,6 +667,7 @@ app.post("/api/product/new", async (req, res) => {
         MFR: mfr || "Unknown",
         Quantity: 0, // Start with 0 as requested
         Date: new Date(),
+        Price: calculatedPrice,
       });
     }
     
@@ -1013,7 +1016,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
 
       // Store supply data in session for month end processing
       let calculatedPrice = 0;
-      calculatedPrice = await getPriceForName(name, qcFlaw);
+      calculatedPrice = await getPriceFromDatabase(result.row, name, qcFlaw);
 
       if (!currentSession.noteContent) currentSession.noteContent = [];
       currentSession.noteContent.push(`SKU scanned: ${barcode}. Spreadsheet match: ${
@@ -1118,7 +1121,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
     
     let nameForPricing = (matchResult.row && (matchResult.row.Name || matchResult.row.Description || matchResult.row.Style)) || "";
     let calculatedPrice = 0;
-    calculatedPrice = await getPriceForName(nameForPricing, qcFlaw);
+    calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
     if (!currentSession.noteContent) currentSession.noteContent = [];
     currentSession.noteContent.push(`SKU scanned: ${barcode}. Spreadsheet match: ${matchResult.file} - ${matchResult.row[matchResult.matchedColumn]}. Price: $${calculatedPrice}`);
@@ -1216,6 +1219,9 @@ app.post("/api/month-end/product/new", async (req, res) => {
     const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
     const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
     
+    // Calculate price using existing pricing logic or provided price
+    const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
+    
     const newProduct = await monthEndCollection.findOneAndUpdate(
       {
         // Use RefNum as primary key if provided, otherwise use UPC
@@ -1232,7 +1238,7 @@ app.post("/api/month-end/product/new", async (req, res) => {
         $set: { 
           UPC: barcode,
           Date: new Date(),
-          Price: price || 0
+          Price: calculatedPrice
         }
       },
       {
@@ -1296,6 +1302,91 @@ app.post("/api/month-end/finish", async (req, res) => {
   } catch (error) {
     console.error("Error in month end finish:", error);
     return res.status(500).json({ error: "Failed to complete month end inventory" });
+  }
+});
+
+// Price management endpoints
+app.get("/api/products/prices", async (req, res) => {
+  try {
+    const inventoryProducts = await Inventory.find({}, {
+      _id: 1,
+      RefNum: 1,
+      UPC: 1,
+      MFR: 1,
+      Style: 1,
+      Size: 1,
+      Price: 1
+    }).lean();
+
+    const overstockProducts = await Overstock.find({}, {
+      _id: 1,
+      RefNum: 1,
+      UPC: 1,
+      MFR: 1,
+      Style: 1,
+      Size: 1,
+      Price: 1
+    }).lean();
+
+    // Add collection type to each product
+    const inventoryWithType = inventoryProducts.map(p => ({ ...p, collection: 'Inventory' }));
+    const overstockWithType = overstockProducts.map(p => ({ ...p, collection: 'Overstock' }));
+
+    const allProducts = [...inventoryWithType, ...overstockWithType];
+    res.json(allProducts);
+  } catch (error) {
+    console.error("Error fetching products for price management:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.put("/api/products/:collection/:id/price", async (req, res) => {
+  try {
+    const { collection, id } = req.params;
+    const { price } = req.body;
+
+    if (!price && price !== 0) {
+      return res.status(400).json({ error: "Price is required" });
+    }
+
+    const numericPrice = parseFloat(price);
+    if (isNaN(numericPrice) || numericPrice < 0) {
+      return res.status(400).json({ error: "Price must be a valid non-negative number" });
+    }
+
+    let model;
+    if (collection === 'Inventory') {
+      model = Inventory;
+    } else if (collection === 'Overstock') {
+      model = Overstock;
+    } else {
+      return res.status(400).json({ error: "Invalid collection" });
+    }
+
+    const updatedProduct = await model.findByIdAndUpdate(
+      id,
+      { Price: numericPrice },
+      { new: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Also update corresponding Month End collections if they exist
+    const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
+    await monthEndModel.updateMany(
+      { RefNum: updatedProduct.RefNum },
+      { $set: { Price: numericPrice } }
+    );
+
+    res.json({ 
+      message: "Price updated successfully",
+      product: updatedProduct
+    });
+  } catch (error) {
+    console.error("Error updating product price:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
