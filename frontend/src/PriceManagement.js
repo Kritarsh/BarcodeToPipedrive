@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from './api/config';
 
 function PriceManagement() {
   const [products, setProducts] = useState([]);
@@ -17,12 +18,11 @@ function PriceManagement() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/products/prices');
-      if (!response.ok) {
-        throw new Error('Failed to fetch products');
+      const response = await api.get('/api/products/prices');
+      if (!response.data) {
+        throw new Error('No data received');
       }
-      const data = await response.json();
-      setProducts(data);
+      setProducts(response.data);
     } catch (err) {
       setError('Failed to load products: ' + err.message);
     } finally {
@@ -40,17 +40,12 @@ function PriceManagement() {
 
     try {
       setSaving(true);
-      const response = await fetch(`/api/products/${editingProduct.collection}/${editingProduct._id}/price`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ price: editPrice }),
+      const response = await api.put(`/api/products/${editingProduct.collection}/${editingProduct._id}/price`, {
+        price: editPrice
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to update price');
+      if (!response.data) {
+        throw new Error('Failed to update price');
       }
 
       // Update the product in the local state
@@ -63,7 +58,7 @@ function PriceManagement() {
       setEditingProduct(null);
       setEditPrice('');
     } catch (err) {
-      setError('Failed to update price: ' + err.message);
+      setError('Failed to update price: ' + (err.response?.data?.error || err.message));
     } finally {
       setSaving(false);
     }

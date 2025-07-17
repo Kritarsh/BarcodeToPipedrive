@@ -29,7 +29,21 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+// CORS configuration for production and development
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',  // Local development
+    'https://localhost:3000', // HTTPS local development
+    /\.onrender\.com$/,       // Any Render subdomain
+    /\.amplifyapp\.com$/,     // Any AWS Amplify subdomain
+    /\.netlify\.app$/,        // Any Netlify subdomain
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-csrf-token']
+};
+
+app.use(cors(corsOptions));
 
 // Add request logging middleware
 app.use((req, res, next) => {
