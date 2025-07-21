@@ -513,6 +513,7 @@ function App() {
         setShowManualRef(false);
         setManualRef("");
         setPendingSku("");
+        setSku(""); // Reset UPC field
         setQuantity(1);
         setRequireSerial(false);
         setSerialNumber("");
@@ -674,6 +675,7 @@ function App() {
       setShowManualRef(false);
       setManualRef("");
       setPendingSku("");
+      setSku(""); // Reset UPC field
       setQuantity(1);
       setRequireSerial(false);
       setSerialNumber("");
@@ -740,6 +742,7 @@ function App() {
           setShowManualRef(false);
           setManualRef("");
           setPendingSku("");
+          setSku(""); // Reset UPC field
           setQuantity(1);
           setRequireSerial(false);
           setSerialNumber("");
