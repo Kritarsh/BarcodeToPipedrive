@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import App from './App';
 import MonthEndInventory from './MonthEndInventory';
 import PriceManagement from './PriceManagement';
+import MagentoInventory from './MagentoInventory';
 import Navigation from './Navigation';
 import './App.css';
 
@@ -16,6 +17,7 @@ root.render(
         <Route path="/" element={<App />} />
         <Route path="/month-end-inventory" element={<MonthEndInventory />} />
         <Route path="/price-management" element={<PriceManagement />} />
+        <Route path="/magento-inventory" element={<MagentoInventory />} />
       </Routes>
     </Router>
   </React.StrictMode>

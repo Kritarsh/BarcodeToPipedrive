@@ -1161,32 +1161,6 @@ app.post("/api/month-end/barcode", async (req, res) => {
           }
         );
 
-        // Also save machine to MagentoInventory collection
-        await MagentoInventory.findOneAndUpdate(
-          {
-            UPC: barcode,
-            Style: barcode,
-            Size: "",
-            MFR: "Machine"
-          },
-          {
-            $inc: { Quantity: 1 },
-            $set: { 
-              RefNum: "",
-              Date: new Date(),
-              Price: machinePrice,
-              QcFlaw: qcFlaw || "none",
-              SerialNumber: serialNumber || "",
-              Source: "month-end"
-            }
-          },
-          {
-            upsert: true,
-            new: true,
-            setDefaultsOnInsert: true
-          }
-        );
-
         if (!currentSession.prices) currentSession.prices = [];
         currentSession.prices.push(machinePrice);
 
@@ -1275,32 +1249,6 @@ app.post("/api/month-end/barcode", async (req, res) => {
         }
       );
 
-      // Also save to MagentoInventory collection
-      await MagentoInventory.findOneAndUpdate(
-        {
-          UPC: upc,
-          Style: result.row.Description || result.row.Name || result.row.Style || "",
-          Size: result.row.Size || "",
-          MFR: result.row.MFR || result.collection
-        },
-        {
-          $inc: { Quantity: quantity },
-          $setOnInsert: { RefNum: "" }, // Only set on insert
-          $set: { 
-            Date: new Date(),
-            Price: calculatedPrice,
-            QcFlaw: qcFlaw || "none",
-            SerialNumber: serialNumber || "",
-            Source: "month-end"
-          }
-        },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true
-        }
-      );
-
       await setSession(sessionId, currentSession);
 
       let descriptionResult;
@@ -1371,7 +1319,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       qcFlaw: qcFlaw,
       serialNumber: serialNumber || "",
       price: calculatedPrice,
-      quantity: quantity, // Add quantity field
+      quantity: quantity, // Add quantity to manual reference entry
       upc: barcode || "", // Use empty string if no barcode
     });
 
@@ -1390,32 +1338,6 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
           ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
-        }
-      },
-      {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true
-      }
-    );
-
-    // Also save to MagentoInventory collection
-    await MagentoInventory.findOneAndUpdate(
-      {
-        RefNum: manualRef || "",
-        Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-        Size: matchResult.row.Size || "",
-        MFR: matchResult.row.MFR || matchResult.collection
-      },
-      {
-        $inc: { Quantity: quantity },
-        $set: { 
-          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
-          Date: new Date(),
-          Price: calculatedPrice,
-          QcFlaw: qcFlaw || "none",
-          SerialNumber: serialNumber || "",
-          Source: "month-end-manual"
         }
       },
       {
@@ -1503,37 +1425,6 @@ app.post("/api/month-end/product/new", async (req, res) => {
           ...(barcode ? { UPC: barcode } : {}), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
-        }
-      },
-      {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true
-      }
-    );
-
-    // Also save to MagentoInventory collection
-    await MagentoInventory.findOneAndUpdate(
-      {
-        // Use RefNum as primary key if provided, otherwise use UPC (only if barcode exists)
-        ...(manualRef ? 
-          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr } :
-          barcode ? { UPC: barcode, Style: description, Size: size || "", MFR: mfr } :
-          { Style: description, Size: size || "", MFR: mfr } // No barcode case
-        )
-      },
-      {
-        $inc: { Quantity: quantity },
-        $setOnInsert: { 
-          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
-        },
-        $set: { 
-          ...(barcode ? { UPC: barcode } : {}), // Only set UPC if barcode exists
-          Date: new Date(),
-          Price: calculatedPrice,
-          QcFlaw: qcFlaw || "none",
-          SerialNumber: serialNumber || "",
-          Source: "month-end-new"
         }
       },
       {
@@ -1780,4 +1671,188 @@ app.get(/^(?!\/api).*/, (req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// Magento Inventory barcode scanning endpoint
+app.post("/api/magento-inventory/barcode", async (req, res) => {
+  try {
+    const { scanType, barcode, qcFlaw, serialNumber, quantity, sessionId } = req.body;
+    
+    console.log(`[Magento Inventory] Barcode scan received:`, { scanType, barcode, qcFlaw, serialNumber, quantity, sessionId });
+
+    // Handle null or empty barcode
+    if (!barcode || barcode.trim() === '') {
+      console.log(`[Magento Inventory] Empty barcode received, returning no match`);
+      return res.json({
+        match: false,
+        message: "No barcode provided. Please use manual entry.",
+        spreadsheetMatch: null,
+        descriptionResult: "",
+        price: null
+      });
+    }
+
+    // Call getPriceFromDatabase to find the product
+    const matchResult = await getPriceFromDatabase(barcode, scanType);
+    
+    if (!matchResult || !matchResult.match) {
+      console.log(`[Magento Inventory] No match found for barcode: ${barcode}`);
+      return res.json({
+        match: false,
+        message: `No product found for ${scanType.toUpperCase()}: ${barcode}`,
+        spreadsheetMatch: null,
+        descriptionResult: "",
+        price: null
+      });
+    }
+
+    // Product found, save to MagentoInventory collection
+    const magentoInventoryItem = new MagentoInventory({
+      RefNum: matchResult.refNum,
+      UPC: matchResult.barcode || barcode,
+      MFR: matchResult.mfr || "",
+      Style: matchResult.style || "",
+      Size: matchResult.size || "",
+      Quantity: quantity || 1,
+      Price: matchResult.price || 0,
+      Date: new Date(),
+      QcFlaw: qcFlaw || "none",
+      SerialNumber: serialNumber || "",
+      Source: `Magento Inventory - ${sessionId}`
+    });
+
+    await magentoInventoryItem.save();
+    console.log(`[Magento Inventory] Item saved:`, magentoInventoryItem);
+
+    res.json({
+      match: true,
+      message: `Product added to Magento inventory successfully!`,
+      spreadsheetMatch: matchResult,
+      descriptionResult: matchResult.style || matchResult.description || "",
+      price: matchResult.price || 0
+    });
+
+  } catch (err) {
+    console.error(`[Magento Inventory] Error in barcode endpoint:`, err);
+    res.status(500).json({ error: "Failed to process barcode scan" });
+  }
+});
+
+// Magento Inventory manual entry endpoint
+app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
+  try {
+    const { manualRef, pendingSku, qcFlaw, serialNumber, quantity, sessionId } = req.body;
+    
+    console.log(`[Magento Inventory] Manual entry received:`, { manualRef, pendingSku, qcFlaw, serialNumber, quantity, sessionId });
+
+    if (!manualRef || manualRef.trim() === '') {
+      return res.status(400).json({ error: "Manual reference number is required" });
+    }
+
+    // Try to find product by manual reference
+    const matchResult = await getPriceFromDatabase(manualRef, "manual");
+    
+    if (!matchResult || !matchResult.match) {
+      console.log(`[Magento Inventory] No match found for manual ref: ${manualRef}`);
+      return res.json({
+        match: false,
+        message: `No product found for reference: ${manualRef}`,
+        spreadsheetMatch: null,
+        descriptionResult: "",
+        price: null
+      });
+    }
+
+    // Product found, save to MagentoInventory collection
+    const magentoInventoryItem = new MagentoInventory({
+      RefNum: matchResult.refNum,
+      UPC: pendingSku || "", // Use the original scanned barcode if available
+      MFR: matchResult.mfr || "",
+      Style: matchResult.style || "",
+      Size: matchResult.size || "",
+      Quantity: quantity || 1,
+      Price: matchResult.price || 0,
+      Date: new Date(),
+      QcFlaw: qcFlaw || "none",
+      SerialNumber: serialNumber || "",
+      Source: `Magento Inventory Manual - ${sessionId}`
+    });
+
+    await magentoInventoryItem.save();
+    console.log(`[Magento Inventory] Manual entry saved:`, magentoInventoryItem);
+
+    res.json({
+      match: true,
+      message: `Product added to Magento inventory via manual reference!`,
+      spreadsheetMatch: matchResult,
+      descriptionResult: matchResult.style || matchResult.description || "",
+      price: matchResult.price || 0
+    });
+
+  } catch (err) {
+    console.error(`[Magento Inventory] Error in manual entry endpoint:`, err);
+    res.status(500).json({ error: "Failed to process manual entry" });
+  }
+});
+
+// Magento Inventory new product endpoint
+app.post("/api/magento-inventory/new-product", async (req, res) => {
+  try {
+    const { product, sessionId } = req.body;
+    
+    console.log(`[Magento Inventory] New product received:`, { product, sessionId });
+
+    if (!product || !product.refNum) {
+      return res.status(400).json({ error: "Product reference number is required" });
+    }
+
+    // Save the new product to MagentoInventory collection
+    const magentoInventoryItem = new MagentoInventory({
+      RefNum: product.refNum,
+      UPC: product.barcode || "",
+      MFR: product.manufacturer || "",
+      Style: product.name || "",
+      Size: product.size || "",
+      Quantity: parseInt(product.quantity) || 1,
+      Price: parseFloat(product.price) || 0,
+      Date: new Date(),
+      QcFlaw: product.qcFlaw || "none",
+      SerialNumber: product.serialNumber || "",
+      Source: `Magento Inventory New Product - ${sessionId}`
+    });
+
+    await magentoInventoryItem.save();
+    console.log(`[Magento Inventory] New product saved:`, magentoInventoryItem);
+
+    res.json({
+      success: true,
+      message: `New product added to Magento inventory successfully!`,
+      product: magentoInventoryItem
+    });
+
+  } catch (err) {
+    console.error(`[Magento Inventory] Error in new product endpoint:`, err);
+    res.status(500).json({ error: "Failed to add new product" });
+  }
+});
+
+// Magento Inventory finish/complete session endpoint
+app.post("/api/magento-inventory/finish", async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    
+    console.log(`[Magento Inventory] Finish session received:`, { sessionId });
+
+    // Optional: You could add any cleanup logic here if needed
+    // For now, just return a success message
+    
+    res.json({
+      success: true,
+      message: `Magento inventory session ${sessionId} completed successfully!`
+    });
+
+  } catch (err) {
+    console.error(`[Magento Inventory] Error in finish endpoint:`, err);
+    res.status(500).json({ error: "Failed to complete Magento inventory session" });
+  }
 });

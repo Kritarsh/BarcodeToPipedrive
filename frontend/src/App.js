@@ -61,14 +61,12 @@ function App() {
   const [inventoryData, setInventoryData] = useState([]);
   const [overstockData, setOverstockData] = useState([]);
   const [machineSpecificsData, setMachineSpecificsData] = useState([]);
-  const [magentoInventoryData, setMagentoInventoryData] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState("inventory");
 
   // Computed variables for table display
   const tableData = selectedCollection === "inventory" ? inventoryData : 
                    selectedCollection === "overstock" ? overstockData : 
-                   selectedCollection === "machineSpecifics" ? machineSpecificsData :
-                   magentoInventoryData;
+                   machineSpecificsData;
 
   const currentFieldOrder = tableData.length > 0 ? Object.keys(tableData[0]) : [];
 
@@ -110,10 +108,6 @@ function App() {
       .get(`${apiUrl}/api/machine-specifics`)
       .then((res) => setMachineSpecificsData(res.data.data))
       .catch(() => setMachineSpecificsData([]));
-    axios
-      .get(`${apiUrl}/api/magento-inventory`)
-      .then((res) => setMagentoInventoryData(res.data.data))
-      .catch(() => setMagentoInventoryData([]));
   }, []);
 
   // Initialize dealFound state and restore backend session
