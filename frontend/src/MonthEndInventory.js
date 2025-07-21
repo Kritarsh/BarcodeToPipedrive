@@ -11,37 +11,57 @@ function MonthEndInventory() {
     console.log(`[Month End Session Start] New session ID created: ${id}`);
     return id;
   });
-  const [sku, setSku] = useState("");
-  const [message, setMessage] = useState("");
-  const [spreadsheetMatch, setSpreadsheetMatch] = useState(null);
-  const [showManualRef, setShowManualRef] = useState(false);
-  const [manualRef, setManualRef] = useState("");
-  const [pendingSku, setPendingSku] = useState("");
-  const [descriptionResult, setDescriptionResult] = useState("");
-  const [qcFlaw, setQcFlaw] = useState("none");
-  const [price, setPrice] = useState(null);
-  const [totalPrice, setTotalPrice] = useState(0);
-  const [requireSerial, setRequireSerial] = useState(false);
-  const [serialNumber, setSerialNumber] = useState("");
-  const [selectedMachine, setSelectedMachine] = useState("");
-  const [showNewProductForm, setShowNewProductForm] = useState(false);
-  const [newProduct, setNewProduct] = useState({
-    barcode: "",
-    description: "",
-    size: "",
-    price: "",
-    qcFlaw: "none",
-    manualRef: "",
-    mfr: "",
+  // Load month end workflow state from localStorage or use default values
+  const [sku, setSku] = useState(() => localStorage.getItem('monthEnd_sku') || '');
+  const [message, setMessage] = useState(() => localStorage.getItem('monthEnd_message') || '');
+  const [spreadsheetMatch, setSpreadsheetMatch] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_spreadsheetMatch');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : null;
   });
-  const [scannedItems, setScannedItems] = useState([]);
-  const [quantity, setQuantity] = useState(1);
+  const [showManualRef, setShowManualRef] = useState(() => localStorage.getItem('monthEnd_showManualRef') === 'true');
+  const [manualRef, setManualRef] = useState(() => localStorage.getItem('monthEnd_manualRef') || '');
+  const [pendingSku, setPendingSku] = useState(() => localStorage.getItem('monthEnd_pendingSku') || '');
+  const [descriptionResult, setDescriptionResult] = useState(() => localStorage.getItem('monthEnd_descriptionResult') || '');
+  const [qcFlaw, setQcFlaw] = useState(() => localStorage.getItem('monthEnd_qcFlaw') || 'none');
+  const [price, setPrice] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_price');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : null;
+  });
+  const [totalPrice, setTotalPrice] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_totalPrice');
+    return saved && saved !== 'undefined' ? parseFloat(saved) : 0;
+  });
+  const [requireSerial, setRequireSerial] = useState(() => localStorage.getItem('monthEnd_requireSerial') === 'true');
+  const [serialNumber, setSerialNumber] = useState(() => localStorage.getItem('monthEnd_serialNumber') || '');
+  const [selectedMachine, setSelectedMachine] = useState(() => localStorage.getItem('monthEnd_selectedMachine') || '');
+  const [showNewProductForm, setShowNewProductForm] = useState(() => localStorage.getItem('monthEnd_showNewProductForm') === 'true');
+  const [newProduct, setNewProduct] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_newProduct');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : {
+      barcode: "",
+      description: "",
+      size: "",
+      price: "",
+      qcFlaw: "none",
+      manualRef: "",
+      mfr: "",
+    };
+  });
+  const [scannedItems, setScannedItems] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_scannedItems');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+  });
+  const [quantity, setQuantity] = useState(() => {
+    const saved = localStorage.getItem('monthEnd_quantity');
+    return saved && saved !== 'undefined' ? parseInt(saved) : 1;
+  });
   const skuInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
 
   // MongoDB data states for Month End collections
   const [monthEndInventoryData, setMonthEndInventoryData] = useState([]);
   const [monthEndOverstockData, setMonthEndOverstockData] = useState([]);
+  const [magentoInventoryData, setMagentoInventoryData] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState("monthEndInventory");
 
   useEffect(() => {
@@ -56,6 +76,75 @@ function MonthEndInventory() {
       manualRefInputRef.current.focus();
     }
   }, [showManualRef]);
+
+  // Save month end workflow state to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('monthEnd_sku', sku);
+  }, [sku]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_message', message);
+  }, [message]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_spreadsheetMatch', JSON.stringify(spreadsheetMatch));
+  }, [spreadsheetMatch]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_showManualRef', showManualRef.toString());
+  }, [showManualRef]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_manualRef', manualRef);
+  }, [manualRef]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_pendingSku', pendingSku);
+  }, [pendingSku]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_descriptionResult', descriptionResult);
+  }, [descriptionResult]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_qcFlaw', qcFlaw);
+  }, [qcFlaw]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_price', JSON.stringify(price));
+  }, [price]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_totalPrice', totalPrice.toString());
+  }, [totalPrice]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_requireSerial', requireSerial.toString());
+  }, [requireSerial]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_serialNumber', serialNumber);
+  }, [serialNumber]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_selectedMachine', selectedMachine);
+  }, [selectedMachine]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_showNewProductForm', showNewProductForm.toString());
+  }, [showNewProductForm]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_newProduct', JSON.stringify(newProduct));
+  }, [newProduct]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_scannedItems', JSON.stringify(scannedItems));
+  }, [scannedItems]);
+
+  useEffect(() => {
+    localStorage.setItem('monthEnd_quantity', quantity.toString());
+  }, [quantity]);
 
   // Function to refresh month end data
   const refreshMonthEndData = () => {
@@ -76,6 +165,15 @@ function MonthEndInventory() {
         setMonthEndOverstockData(res.data.data);
       })
       .catch(() => setMonthEndOverstockData([]));
+
+    // Refresh Magento Inventory data
+    axios
+      .get(`${apiUrl}/api/magento-inventory`)
+      .then((res) => {
+        console.log("Refreshed Magento Inventory Data:", res.data.data);
+        setMagentoInventoryData(res.data.data);
+      })
+      .catch(() => setMagentoInventoryData([]));
   };
 
   // Fetch Month End Inventory data
@@ -98,6 +196,17 @@ function MonthEndInventory() {
         setMonthEndOverstockData(res.data.data);
       })
       .catch(() => setMonthEndOverstockData([]));
+  }, []);
+
+  // Fetch Magento Inventory data
+  useEffect(() => {
+    axios
+      .get(`${apiUrl}/api/magento-inventory`)
+      .then((res) => {
+        console.log("Magento Inventory Data:", res.data.data);
+        setMagentoInventoryData(res.data.data);
+      })
+      .catch(() => setMagentoInventoryData([]));
   }, []);
 
 
@@ -211,7 +320,7 @@ function MonthEndInventory() {
 
     try {
       const res = await axios.post(`${apiUrl}/api/month-end/barcode/manual`, {
-        barcode: pendingSku,
+        barcode: pendingSku === "NO_BARCODE" ? null : pendingSku,
         manualRef,
         sessionId,
         qcFlaw,
@@ -269,6 +378,7 @@ function MonthEndInventory() {
     try {
       const res = await axios.post(`${apiUrl}/api/month-end/product/new`, {
         ...newProduct,
+        barcode: newProduct.barcode === "NO_BARCODE" ? null : newProduct.barcode,
         sessionId,
         serialNumber,
         quantity,
@@ -279,7 +389,7 @@ function MonthEndInventory() {
 
       // Add to scannedItems
       setScannedItems((prev) => [...prev, {
-        upc: newProduct.barcode,
+        upc: newProduct.barcode === "NO_BARCODE" ? null : newProduct.barcode,
         description: newProduct.description,
         price: Number(newProduct.price) || 0,
         qcFlaw: newProduct.qcFlaw,
@@ -316,6 +426,9 @@ function MonthEndInventory() {
       const res = await axios.post(`${apiUrl}/api/month-end/finish`, {
         sessionId,
       });
+      
+      // Clear month end workflow state from localStorage
+      clearMonthEndWorkflowState();
       
       setMessage(res.data.message || "Month End inventory completed successfully.");
       setScannedItems([]);
@@ -406,9 +519,14 @@ function MonthEndInventory() {
   // Function to handle CSV export
   const handleExportCSV = async () => {
     try {
-      const endpoint = selectedCollection === "monthEndInventory" 
-        ? "/api/month-end-inventory/export-csv"
-        : "/api/month-end-overstock/export-csv";
+      let endpoint;
+      if (selectedCollection === "monthEndInventory") {
+        endpoint = "/api/month-end-inventory/export-csv";
+      } else if (selectedCollection === "monthEndOverstock") {
+        endpoint = "/api/month-end-overstock/export-csv";
+      } else if (selectedCollection === "magentoInventory") {
+        endpoint = "/api/magento-inventory/export-csv";
+      }
       
       const response = await fetch(`${apiUrl}${endpoint}`);
       
@@ -441,7 +559,12 @@ function MonthEndInventory() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-      setMessage(`${selectedCollection === "monthEndInventory" ? "Inventory" : "Overstock"} CSV exported successfully!`);
+      const collectionNames = {
+        monthEndInventory: "Inventory",
+        monthEndOverstock: "Overstock", 
+        magentoInventory: "Magento Inventory"
+      };
+      setMessage(`${collectionNames[selectedCollection]} CSV exported successfully!`);
     } catch (error) {
       console.error("Error exporting CSV:", error);
       setMessage("Failed to export CSV. Please try again.");
@@ -452,12 +575,61 @@ function MonthEndInventory() {
   let tableData = [];
   if (selectedCollection === "monthEndInventory") tableData = monthEndInventoryData;
   else if (selectedCollection === "monthEndOverstock") tableData = monthEndOverstockData;
+  else if (selectedCollection === "magentoInventory") tableData = magentoInventoryData;
 
   const fieldOrders = {
     monthEndInventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"],
     monthEndOverstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"],
+    magentoInventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"],
   };
   const currentFieldOrder = fieldOrders[selectedCollection] || [];
+
+  // Function to clear month end workflow state from localStorage
+  const clearMonthEndWorkflowState = () => {
+    const keysToRemove = [
+      'monthEnd_sku',
+      'monthEnd_message',
+      'monthEnd_spreadsheetMatch',
+      'monthEnd_showManualRef',
+      'monthEnd_manualRef',
+      'monthEnd_pendingSku',
+      'monthEnd_descriptionResult',
+      'monthEnd_qcFlaw',
+      'monthEnd_price',
+      'monthEnd_totalPrice',
+      'monthEnd_requireSerial',
+      'monthEnd_serialNumber',
+      'monthEnd_selectedMachine',
+      'monthEnd_showNewProductForm',
+      'monthEnd_newProduct',
+      'monthEnd_scannedItems',
+      'monthEnd_quantity'
+    ];
+    
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+    });
+  };
+
+  const handleNoBarcodeEntry = () => {
+    // Bypass UPC entirely - go directly to manual reference with no UPC
+    setShowManualRef(true);
+    setPendingSku("NO_BARCODE"); // Use a special placeholder to indicate no barcode
+    setSku(""); // Clear any existing UPC
+    setMessage("No barcode available. Enter manual reference:");
+  };
+
+  const handleManualEntry = (currentSku) => {
+    const skuToUse = currentSku || sku;
+    if (!skuToUse.trim()) {
+      setMessage("Please enter a UPC before using manual entry.");
+      return;
+    }
+    // Directly show manual reference form with the current SKU as pending
+    setShowManualRef(true);
+    setPendingSku(skuToUse);
+    setMessage("Enter manual reference for the item:");
+  };
 
   return (
     <div className="min-h-screen w-full bg-base-200 flex">
@@ -477,6 +649,8 @@ function MonthEndInventory() {
             setQcFlaw={setQcFlaw}
             quantity={quantity}
             setQuantity={setQuantity}
+            onManualEntry={handleManualEntry}
+            onNoBarcodeEntry={handleNoBarcodeEntry}
           />
 
           {showManualRef && (
@@ -621,6 +795,7 @@ function MonthEndInventory() {
               >
                 <option value="monthEndInventory">Month End Inventory</option>
                 <option value="monthEndOverstock">Month End Overstock</option>
+                <option value="magentoInventory">Magento Inventory</option>
               </select>
               <button
                 onClick={handleExportCSV}

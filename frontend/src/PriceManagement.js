@@ -5,15 +5,26 @@ function PriceManagement() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterCollection, setFilterCollection] = useState('all');
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [editPrice, setEditPrice] = useState('');
+  // Load from localStorage or use default values
+  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('pm_searchTerm') || '');
+  const [filterCollection, setFilterCollection] = useState(() => localStorage.getItem('pm_filterCollection') || 'all');
+  const [editingField, setEditingField] = useState(null);
+  const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchProducts();
   }, []);
+
+  // Save search term to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('pm_searchTerm', searchTerm);
+  }, [searchTerm]);
+
+  // Save filter collection to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('pm_filterCollection', filterCollection);
+  }, [filterCollection]);
 
   const fetchProducts = async () => {
     try {
@@ -30,43 +41,68 @@ function PriceManagement() {
     }
   };
 
-  const handleEditPrice = (product) => {
-    setEditingProduct(product);
-    setEditPrice(product.Price ? product.Price.toString() : '0');
+  const handleEditField = (product, field, currentValue) => {
+    setEditingField({ productId: product._id, field });
+    setEditValue(currentValue || '');
   };
 
-  const handleSavePrice = async () => {
-    if (!editingProduct) return;
+  const handleSaveField = async () => {
+    if (!editingField) return;
 
     try {
       setSaving(true);
-      const response = await api.put(`/api/products/${editingProduct.collection}/${editingProduct._id}/price`, {
-        price: editPrice
-      });
+      const product = products.find(p => p._id === editingField.productId);
+      
+      // Create update object with the edited field
+      const updateData = {};
+      
+      if (editingField.field === 'price') {
+        updateData.price = parseFloat(editValue) || 0;
+      } else if (editingField.field === 'refNum') {
+        updateData.refNum = editValue;
+      } else if (editingField.field === 'upc') {
+        updateData.upc = editValue;
+      } else if (editingField.field === 'mfr') {
+        updateData.mfr = editValue;
+      } else if (editingField.field === 'style') {
+        updateData.style = editValue;
+      } else if (editingField.field === 'size') {
+        updateData.size = editValue;
+      }
+
+      const response = await api.put(`/api/products/${product.collection}/${product._id}`, updateData);
 
       if (!response.data) {
-        throw new Error('Failed to update price');
+        throw new Error('Failed to update product');
       }
 
       // Update the product in the local state
       setProducts(prev => prev.map(p => 
-        p._id === editingProduct._id 
-          ? { ...p, Price: parseFloat(editPrice) }
+        p._id === editingField.productId 
+          ? { ...p, ...response.data.product }
           : p
       ));
 
-      setEditingProduct(null);
-      setEditPrice('');
+      setEditingField(null);
+      setEditValue('');
     } catch (err) {
-      setError('Failed to update price: ' + (err.response?.data?.error || err.message));
+      setError('Failed to update product: ' + (err.response?.data?.error || err.message));
     } finally {
       setSaving(false);
     }
   };
 
   const handleCancelEdit = () => {
-    setEditingProduct(null);
-    setEditPrice('');
+    setEditingField(null);
+    setEditValue('');
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSaveField();
+    } else if (e.key === 'Escape') {
+      handleCancelEdit();
+    }
   };
 
   const filteredProducts = products.filter(product => {
@@ -80,6 +116,57 @@ function PriceManagement() {
 
     return matchesSearch && matchesFilter;
   });
+
+  const renderEditableField = (product, field, value, isNumber = false) => {
+    const isEditing = editingField && editingField.productId === product._id && editingField.field === field;
+    
+    if (isEditing) {
+      return (
+        <input
+          type={isNumber ? "number" : "text"}
+          step={isNumber ? "0.01" : undefined}
+          min={isNumber ? "0" : undefined}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyPress}
+          onBlur={handleSaveField}
+          className="w-full px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+          disabled={saving}
+          autoFocus
+        />
+      );
+    }
+
+    return (
+      <div
+        className="w-full px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 rounded transition-colors"
+        onDoubleClick={() => handleEditField(product, field, value)}
+        title="Double-click to edit"
+      >
+        {field === 'collection' ? (
+          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+            value === 'Inventory' 
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200' 
+              : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+          }`}>
+            {value}
+          </span>
+        ) : field === 'price' ? (
+          <span className="text-lg font-semibold">
+            ${(parseFloat(value) || 0).toFixed(2)}
+          </span>
+        ) : field === 'upc' ? (
+          <span className="font-mono text-sm">
+            {value || '-'}
+          </span>
+        ) : (
+          <span>
+            {value || '-'}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -98,7 +185,9 @@ function PriceManagement() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
       <div className="max-w-full mx-auto p-6">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Price Management</h2>
-        <p className="text-gray-600 dark:text-gray-400 mb-6">Manage prices for inventory and overstock items</p>
+        <p className="text-gray-600 dark:text-gray-400 mb-6">
+          Manage prices for inventory and overstock items. Double-click any field to edit.
+        </p>
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md p-4 mb-6 flex items-center justify-between">
@@ -171,81 +260,31 @@ function PriceManagement() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Price
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Actions
-                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredProducts.map((product) => (
-                  <tr key={`${product.collection}-${product._id}`} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <tr key={product._id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        product.collection === 'Inventory' 
-                          ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200' 
-                          : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
-                      }`}>
-                        {product.collection}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {product.RefNum || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400 font-mono">
-                      {product.UPC || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {product.MFR || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">
-                      {product.Style || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {product.Size || '-'}
+                      {renderEditableField(product, 'collection', product.collection)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {editingProduct && editingProduct._id === product._id ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={editPrice}
-                          onChange={(e) => setEditPrice(e.target.value)}
-                          className="w-20 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
-                          disabled={saving}
-                        />
-                      ) : (
-                        <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                          ${product.Price ? product.Price.toFixed(2) : '0.00'}
-                        </span>
-                      )}
+                      {renderEditableField(product, 'refNum', product.RefNum)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {editingProduct && editingProduct._id === product._id ? (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={handleSavePrice}
-                            disabled={saving}
-                            className="bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors"
-                          >
-                            {saving ? 'Saving...' : 'Save'}
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            disabled={saving}
-                            className="bg-gray-600 hover:bg-gray-700 dark:bg-gray-500 dark:hover:bg-gray-600 disabled:bg-gray-400 dark:disabled:bg-gray-600 text-white px-3 py-1 rounded text-sm transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => handleEditPrice(product)}
-                          className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white px-3 py-1 rounded text-sm transition-colors"
-                        >
-                          Edit Price
-                        </button>
-                      )}
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {renderEditableField(product, 'upc', product.UPC)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {renderEditableField(product, 'mfr', product.MFR)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {renderEditableField(product, 'style', product.Style)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {renderEditableField(product, 'size', product.Size)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {renderEditableField(product, 'price', product.Price, true)}
                     </td>
                   </tr>
                 ))}

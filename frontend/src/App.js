@@ -7,33 +7,52 @@ const apiUrl = process.env.REACT_APP_API_URL;
 
 function App() {
   const [sessionId] = useState(() => Math.random().toString(36).substr(2, 9));
-  const [trackingNumber, setTrackingNumber] = useState("");
-  const [sku, setSku] = useState("");
-  const [dealFound, setDealFound] = useState(false);
-  const [message, setMessage] = useState("");
-  const [spreadsheetMatch, setSpreadsheetMatch] = useState(null);
-  const [showManualRef, setShowManualRef] = useState(false);
-  const [manualRef, setManualRef] = useState("");
-  const [pendingSku, setPendingSku] = useState("");
-  const [descriptionResult, setDescriptionResult] = useState("");
-  const [qcFlaw, setQcFlaw] = useState("none");
-  const [price, setPrice] = useState(null);
-  const [totalPrice, setTotalPrice] = useState(0);
-  const [quantity, setQuantity] = useState(1);
-  const [requireSerial, setRequireSerial] = useState(false);
-  const [serialNumber, setSerialNumber] = useState("");
-  const [selectedMachine, setSelectedMachine] = useState("");
-  const [showNewProductForm, setShowNewProductForm] = useState(false);
-  const [newProduct, setNewProduct] = useState({
-    barcode: "",
-    description: "",
-    size: "",
-    price: "",
-    qcFlaw: "none",
-    manualRef: "", // <-- change from serialNumber to manualRef
-    mfr: "",
+  // Load workflow state from localStorage or use default values
+  const [trackingNumber, setTrackingNumber] = useState(() => localStorage.getItem('pipedrive_trackingNumber') || '');
+  const [sku, setSku] = useState(() => localStorage.getItem('pipedrive_sku') || '');
+  const [dealFound, setDealFound] = useState(() => localStorage.getItem('pipedrive_dealFound') === 'true');
+  const [message, setMessage] = useState(() => localStorage.getItem('pipedrive_message') || '');
+  const [spreadsheetMatch, setSpreadsheetMatch] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_spreadsheetMatch');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : null;
   });
-  const [scannedItems, setScannedItems] = useState([]);
+  const [showManualRef, setShowManualRef] = useState(() => localStorage.getItem('pipedrive_showManualRef') === 'true');
+  const [manualRef, setManualRef] = useState(() => localStorage.getItem('pipedrive_manualRef') || '');
+  const [pendingSku, setPendingSku] = useState(() => localStorage.getItem('pipedrive_pendingSku') || '');
+  const [descriptionResult, setDescriptionResult] = useState(() => localStorage.getItem('pipedrive_descriptionResult') || '');
+  const [qcFlaw, setQcFlaw] = useState(() => localStorage.getItem('pipedrive_qcFlaw') || 'none');
+  const [price, setPrice] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_price');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : null;
+  });
+  const [totalPrice, setTotalPrice] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_totalPrice');
+    return saved && saved !== 'undefined' ? parseFloat(saved) : 0;
+  });
+  const [quantity, setQuantity] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_quantity');
+    return saved && saved !== 'undefined' ? parseInt(saved) : 1;
+  });
+  const [requireSerial, setRequireSerial] = useState(() => localStorage.getItem('pipedrive_requireSerial') === 'true');
+  const [serialNumber, setSerialNumber] = useState(() => localStorage.getItem('pipedrive_serialNumber') || '');
+  const [selectedMachine, setSelectedMachine] = useState(() => localStorage.getItem('pipedrive_selectedMachine') || '');
+  const [showNewProductForm, setShowNewProductForm] = useState(() => localStorage.getItem('pipedrive_showNewProductForm') === 'true');
+  const [newProduct, setNewProduct] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_newProduct');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : {
+      barcode: "",
+      description: "",
+      size: "",
+      price: "",
+      qcFlaw: "none",
+      manualRef: "",
+      mfr: "",
+    };
+  });
+  const [scannedItems, setScannedItems] = useState(() => {
+    const saved = localStorage.getItem('pipedrive_scannedItems');
+    return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+  });
   const skuInputRef = useRef(null);
   const trackingInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
@@ -42,7 +61,16 @@ function App() {
   const [inventoryData, setInventoryData] = useState([]);
   const [overstockData, setOverstockData] = useState([]);
   const [machineSpecificsData, setMachineSpecificsData] = useState([]);
+  const [magentoInventoryData, setMagentoInventoryData] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState("inventory");
+
+  // Computed variables for table display
+  const tableData = selectedCollection === "inventory" ? inventoryData : 
+                   selectedCollection === "overstock" ? overstockData : 
+                   selectedCollection === "machineSpecifics" ? machineSpecificsData :
+                   magentoInventoryData;
+
+  const currentFieldOrder = tableData.length > 0 ? Object.keys(tableData[0]) : [];
 
   const cpapMachines = [
     "AirSense 10",
@@ -82,29 +110,177 @@ function App() {
       .get(`${apiUrl}/api/machine-specifics`)
       .then((res) => setMachineSpecificsData(res.data.data))
       .catch(() => setMachineSpecificsData([]));
+    axios
+      .get(`${apiUrl}/api/magento-inventory`)
+      .then((res) => setMagentoInventoryData(res.data.data))
+      .catch(() => setMagentoInventoryData([]));
   }, []);
 
+  // Initialize dealFound state and restore backend session
   useEffect(() => {
-    if (!dealFound && trackingInputRef.current) {
-      trackingInputRef.current.focus();
+    if (trackingNumber && !dealFound) {
+      setDealFound(true);
+      // Only set the message if there isn't already a meaningful message
+      if (!message || message === '') {
+        setMessage("Tracking Number loaded from previous session! Now scan SKU.");
+      }
+      
+      // Restore backend session if we have scanned items
+      if (scannedItems.length > 0) {
+        restoreBackendSession();
+      }
     }
+  }, []); // Only run on mount
+
+  // Function to restore backend session from localStorage data
+  const restoreBackendSession = async () => {
+    try {
+      setMessage("Restoring session...");
+      await axios.post(`${apiUrl}/api/session/restore`, {
+        sessionId,
+        trackingNumber,
+        scannedItems,
+        totalPrice
+      });
+      setMessage("Session restored! Ready to continue scanning or submit to Pipedrive.");
+    } catch (error) {
+      console.error("Failed to restore backend session:", error);
+      setMessage("Warning: Session could not be fully restored. You may need to re-enter tracking number.");
+      // Don't reset dealFound here as the frontend state is still valid
+    }
+  };
+
+  // Save workflow state to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('pipedrive_trackingNumber', trackingNumber);
+  }, [trackingNumber]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_sku', sku);
+  }, [sku]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_dealFound', dealFound.toString());
   }, [dealFound]);
+
   useEffect(() => {
-    if (dealFound && !showManualRef && !showNewProductForm) {
-      setTimeout(() => {
-        if (skuInputRef.current) skuInputRef.current.focus();
-      }, 0);
-    }
-  }, [dealFound, showManualRef, showNewProductForm]);
+    localStorage.setItem('pipedrive_message', message);
+  }, [message]);
+
   useEffect(() => {
-    if (showManualRef && manualRefInputRef.current) {
-      manualRefInputRef.current.focus();
-    }
+    localStorage.setItem('pipedrive_spreadsheetMatch', JSON.stringify(spreadsheetMatch));
+  }, [spreadsheetMatch]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_showManualRef', showManualRef.toString());
   }, [showManualRef]);
 
+  useEffect(() => {
+    localStorage.setItem('pipedrive_manualRef', manualRef);
+  }, [manualRef]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_pendingSku', pendingSku);
+  }, [pendingSku]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_descriptionResult', descriptionResult);
+  }, [descriptionResult]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_qcFlaw', qcFlaw);
+  }, [qcFlaw]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_price', JSON.stringify(price));
+  }, [price]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_totalPrice', totalPrice.toString());
+  }, [totalPrice]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_quantity', quantity.toString());
+  }, [quantity]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_requireSerial', requireSerial.toString());
+  }, [requireSerial]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_serialNumber', serialNumber);
+  }, [serialNumber]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_selectedMachine', selectedMachine);
+  }, [selectedMachine]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_showNewProductForm', showNewProductForm.toString());
+  }, [showNewProductForm]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_newProduct', JSON.stringify(newProduct));
+  }, [newProduct]);
+
+  useEffect(() => {
+    localStorage.setItem('pipedrive_scannedItems', JSON.stringify(scannedItems));
+  }, [scannedItems]);
+
+  // Function to clear workflow state from localStorage
+  const clearWorkflowState = () => {
+    const keysToRemove = [
+      'pipedrive_trackingNumber',
+      'pipedrive_sku',
+      'pipedrive_dealFound',
+      'pipedrive_message',
+      'pipedrive_spreadsheetMatch',
+      'pipedrive_showManualRef',
+      'pipedrive_manualRef',
+      'pipedrive_pendingSku',
+      'pipedrive_descriptionResult',
+      'pipedrive_qcFlaw',
+      'pipedrive_price',
+      'pipedrive_totalPrice',
+      'pipedrive_quantity',
+      'pipedrive_requireSerial',
+      'pipedrive_serialNumber',
+      'pipedrive_selectedMachine',
+      'pipedrive_showNewProductForm',
+      'pipedrive_newProduct',
+      'pipedrive_scannedItems'
+    ];
+    
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+    });
+  };
+
+  // Handler functions for the workflow
   const handleTrackingSubmit = async (e) => {
     e.preventDefault();
     setMessage("Searching for Tracking Number...");
+    
+    // If there are existing scanned items, restore session first to submit them to Pipedrive
+    if (scannedItems.length > 0 && trackingNumber) {
+      try {
+        setMessage("Finalizing previous batch and submitting to Pipedrive...");
+        
+        // First restore the session to ensure backend has the data
+        await axios.post(`${apiUrl}/api/session/restore`, {
+          sessionId,
+          trackingNumber,
+          scannedItems,
+          totalPrice
+        });
+        
+        setMessage("Previous batch submitted to Pipedrive. Searching for new tracking number...");
+      } catch (err) {
+        console.error("Failed to restore session for previous batch:", err);
+        setMessage("Warning: Previous batch may not have been submitted. Continuing with new tracking number...");
+      }
+    }
+    
     try {
       const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "tracking",
@@ -148,283 +324,416 @@ function App() {
     setMessage(selectedMachine ? "Adding machine..." : "Checking SKU...");
     setShowManualRef(false);
     setManualRef("");
+    setPendingSku("");
+    setDescriptionResult("");
     setPrice(null);
+    setShowNewProductForm(false);
+    setNewProduct({
+      barcode: "",
+      description: "",
+      size: "",
+      price: "",
+      qcFlaw: "none",
+      manualRef: "",
+      mfr: "",
+    });
 
     try {
-      if (selectedMachine) {
-        // Send machine and serial number
-        const res = await axios.post(`${apiUrl}/api/barcode`, {
-          scanType: "sku",
-          barcode: selectedMachine,
-          sessionId,
-          qcFlaw,
-          quantity,
-          serialNumber: sku, // sku field is used for serial number here
-        });
-        setSpreadsheetMatch(res.data.spreadsheetMatch);
-        setMessage("Machine added and note attached!");
-        setPrice(res.data.price);
-        if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
-          setTotalPrice((prev) => prev + (res.data.price * quantity));
-        }
-        
-        // Add to scannedItems
-        setScannedItems((prev) => [...prev, {
-          upc: selectedMachine,
-          description: selectedMachine,
-          price: res.data.price,
-          qcFlaw: qcFlaw,
-          serialNumber: sku, // sku field is used for serial number here
-          quantity: quantity,
-          isMachine: true
-        }]);
-        
-        setSelectedMachine("");
-        setSku("");
-        setQuantity(1);
-        setQcFlaw("none"); // <-- Add this line
-        return;
-      }
-
-      // Normal UPC flow
       const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "sku",
-        barcode: sku,
+        barcode: selectedMachine || sku,
         sessionId,
         qcFlaw,
+        serialNumber,
         quantity,
       });
-      const nameForSerialCheck =
-        (res.data.row &&
-          (res.data.row.Name ||
-            res.data.row.Description ||
-            res.data.row.Style)) ||
-        (res.data.descriptionResult &&
-          res.data.descriptionResult.description) ||
-        "";
 
-      setSpreadsheetMatch(res.data.spreadsheetMatch);
-      setMessage(
-        res.data.spreadsheetMatch
-          ? "SKU found and note added!"
-          : "SKU not found"
-      );
-
-      // ADD THIS LINE - Set description result for display
-      setDescriptionResult(res.data.descriptionResult || "");
-
-      if (
-        cpapMachines.some((keyword) =>
-          (nameForSerialCheck || "")
-            .toLowerCase()
-            .includes(keyword.toLowerCase())
-        )
-      ) {
-        setRequireSerial(true);
-        setPendingSku(sku);
-        setSku("");
+      // Check if the response indicates no match
+      if (res.data.match === false) {
+        console.log("No match found, showing manual reference form");
+        setMessage(res.data.message || "SKU not found in spreadsheet.");
+        setShowManualRef(true);
+        setPendingSku(selectedMachine || sku);
         return;
       }
 
-      if (!res.data.spreadsheetMatch) {
-        setShowManualRef(true);
-        setPendingSku(sku);
-        // Focus on manual reference input after a short delay to ensure DOM is updated
-        setTimeout(() => {
-          if (manualRefInputRef.current) {
-            manualRefInputRef.current.focus();
-          }
-        }, 0);
-      } else {
-        // Add to scannedItems for successful UPC scans
-        setScannedItems((prev) => [...prev, {
-          upc: sku,
-          description: res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || sku,
-          price: res.data.price,
-          qcFlaw: qcFlaw,
-          serialNumber: serialNumber,
-          quantity: quantity
-        }]);
-        
-        // Only reset quantity if the scan was successful
-        setQuantity(1);
-      }
-      setSku("");
+      setMessage(res.data.message || "Success!");
       setPrice(res.data.price);
+      setTotalPrice(totalPrice + (res.data.price || 0) * quantity);
+      setSpreadsheetMatch(res.data.spreadsheetMatch);
+      setDescriptionResult(res.data.descriptionResult);
 
-      if (qcFlaw !== "flaw" && !isNaN(res.data.price)) {
-        setTotalPrice((prev) => prev + (res.data.price * quantity));
-      }
+      // Add to scanned items
+      const newItem = {
+        sku: selectedMachine || sku,
+        description: res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || selectedMachine || sku,
+        price: res.data.price || 0,
+        quantity: quantity,
+        qcFlaw: qcFlaw,
+        serialNumber: serialNumber,
+        size: res.data.row?.Size || "",
+        isMachine: !!selectedMachine,
+        collection: res.data.spreadsheetMatch,
+        timestamp: new Date().toISOString(),
+      };
+      setScannedItems(prev => [...prev, newItem]);
+
+      setSku("");
+      setQuantity(1);
+      setRequireSerial(false);
+      setSerialNumber("");
+      setSelectedMachine("");
+      setQcFlaw("none");
     } catch (err) {
-      setMessage(err.response?.data?.error || "Error checking SKU.");
+      console.log("SKU submission error:", err.response?.data);
+      
+      // Check if the error is about missing deal/session
+      if (err.response?.data?.error?.includes("No deal found for this session")) {
+        console.log("Session expired, attempting to restore session...");
+        setMessage("Session expired, restoring session...");
+        
+        try {
+          // Use the new session restore endpoint instead of just tracking number
+          await axios.post(`${apiUrl}/api/session/restore`, {
+            sessionId,
+            trackingNumber,
+            scannedItems,
+            totalPrice
+          });
+          
+          setMessage("Session restored! Retrying SKU scan...");
+          
+          // Now retry the original SKU submission
+          const retryRes = await axios.post(`${apiUrl}/api/barcode`, {
+            scanType: "sku",
+            barcode: selectedMachine || sku,
+            sessionId,
+            qcFlaw,
+            serialNumber,
+            quantity,
+          });
+
+          // Handle the successful retry response
+          if (retryRes.data.match === false) {
+            console.log("No match found after retry, showing manual reference form");
+            setMessage(retryRes.data.message || "SKU not found in spreadsheet.");
+            setShowManualRef(true);
+            setPendingSku(selectedMachine || sku);
+            return;
+          }
+
+          setMessage(retryRes.data.message || "Success!");
+          setPrice(retryRes.data.price);
+          setTotalPrice(totalPrice + (retryRes.data.price || 0) * quantity);
+          setSpreadsheetMatch(retryRes.data.spreadsheetMatch);
+          setDescriptionResult(retryRes.data.descriptionResult);
+
+          // Add to scanned items
+          const newItem = {
+            sku: selectedMachine || sku,
+            description: retryRes.data.row?.Description || retryRes.data.row?.Name || retryRes.data.row?.Style || selectedMachine || sku,
+            price: retryRes.data.price || 0,
+            quantity: quantity,
+            qcFlaw: qcFlaw,
+            serialNumber: serialNumber,
+            size: retryRes.data.row?.Size || "",
+            isMachine: !!selectedMachine,
+            collection: retryRes.data.spreadsheetMatch,
+            timestamp: new Date().toISOString(),
+          };
+          setScannedItems(prev => [...prev, newItem]);
+
+          setSku("");
+          setQuantity(1);
+          setRequireSerial(false);
+          setSerialNumber("");
+          setSelectedMachine("");
+          setQcFlaw("none");
+          
+        } catch (retryErr) {
+          console.error("Failed to restore session and retry:", retryErr);
+          setMessage("Failed to restore session. Please re-enter tracking number.");
+          setDealFound(false); // Reset so user can re-enter tracking number
+        }
+      } else {
+        setMessage(err.response?.data?.error || "Failed to process SKU.");
+      }
     }
+  };
+
+  const handleNoBarcodeEntry = () => {
+    // Bypass UPC entirely - go directly to manual reference with no UPC
+    setShowManualRef(true);
+    setPendingSku("NO_BARCODE"); // Use a special placeholder to indicate no barcode
+    setSku(""); // Clear any existing UPC
+    setMessage("No barcode available. Enter manual reference:");
+  };
+
+  const handleManualEntry = (currentSku) => {
+    const skuToUse = currentSku || sku;
+    if (!skuToUse.trim()) {
+      setMessage("Please enter a UPC before using manual entry.");
+      return;
+    }
+    // Directly show manual reference form with the current SKU as pending
+    setShowManualRef(true);
+    setPendingSku(skuToUse);
+    setMessage("Enter manual reference for the item:");
   };
 
   const handleManualRefSubmit = async (e) => {
     e.preventDefault();
     setMessage("Checking manual reference...");
-    setDescriptionResult("");
-    let description = "";
-    const selectedRows = inventoryData;
-    const matchedRow = selectedRows.find((row) =>
-      Object.values(row).some(
-        (val) => val && val.toString().toLowerCase() === manualRef.toLowerCase()
-      )
-    );
-    if (matchedRow) {
-      description =
-        matchedRow.Description ||
-        matchedRow["description"] ||
-        Object.values(matchedRow)[0] ||
-        "";
-    }
     try {
-      const retryRes = await axios.post(`${apiUrl}/api/barcode/manual`, {
-        barcode: pendingSku,
+      const res = await axios.post(`${apiUrl}/api/barcode/manual`, {
+        barcode: pendingSku === "NO_BARCODE" ? null : pendingSku,
         manualRef,
         sessionId,
-        description,
-        price,
-        quantity,
-        serialNumber,
         qcFlaw,
+        serialNumber,
+        quantity,
       });
-      
-      // Check if the manual reference was successful
-      if (retryRes.data.match === false) {
-        // Manual reference failed, show new product form
-        setMessage("SKU not found even with the manual reference.");
+
+      if (res.data.match) {
+        setMessage(res.data.message || "Success!");
+        setPrice(res.data.price);
+        setTotalPrice(totalPrice + (res.data.price || 0) * quantity);
+        setSpreadsheetMatch(res.data.spreadsheetMatch);
+        setDescriptionResult(res.data.descriptionResult);
+
+        // Add to scanned items
+        const newItem = {
+          sku: pendingSku === "NO_BARCODE" ? "" : pendingSku,
+          description: res.data.descriptionResult?.description || pendingSku,
+          price: res.data.price || 0,
+          quantity: quantity,
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber,
+          manualRef: manualRef,
+          size: res.data.descriptionResult?.size || "",
+          collection: res.data.spreadsheetMatch ? "Found via Manual Ref" : "Unknown",
+          timestamp: new Date().toISOString(),
+        };
+        setScannedItems(prev => [...prev, newItem]);
+
+        setShowManualRef(false);
+        setManualRef("");
+        setPendingSku("");
+        setQuantity(1);
+        setRequireSerial(false);
+        setSerialNumber("");
+        setQcFlaw("none");
+      } else {
+        setMessage(res.data.message || "Manual reference not found.");
         setShowNewProductForm(true);
         setNewProduct({
-          ...newProduct,
           barcode: pendingSku,
+          description: "",
+          size: "",
+          price: "",
+          qcFlaw: qcFlaw,
           manualRef: manualRef,
-          qcFlaw,
+          mfr: "",
         });
-        return;
       }
-      
-      // Add to scannedItems for successful manual reference
-      setScannedItems((prev) => [...prev, {
-        upc: pendingSku,
-        description: retryRes.data.descriptionResult?.description || pendingSku,
-        price: retryRes.data.price,
-        qcFlaw: qcFlaw,
-        serialNumber: serialNumber,
-        quantity: quantity,
-        manualRef: manualRef
-      }]);
-      
-      setSpreadsheetMatch(retryRes.data.spreadsheetMatch);
-      setMessage(
-        retryRes.data.spreadsheetMatch
-          ? "SKU found and note added!"
-          : retryRes.data.descriptionMatch
-          ? "SKU not found by manual reference, but found by description!"
-          : "SKU not found even with the manual reference."
-      );
-      setShowManualRef(false);
-      setManualRef("");
-      setPendingSku("");
-      setQuantity(1);
-      setDescriptionResult(retryRes.data.descriptionResult);
-      setPrice(retryRes.data.price);
-      if (qcFlaw !== "flaw" && !isNaN(retryRes.data.price)) {
-        setTotalPrice((prev) => prev + (retryRes.data.price * quantity));
-      }
-      setQcFlaw("none"); // <-- Add this line
-      setSerialNumber(""); // Clear serial number
-      setTimeout(() => {
-        if (skuInputRef.current) {
-          skuInputRef.current.focus();
-        }
-      }, 0);
     } catch (err) {
-      setMessage(
-        err.response?.data?.error || "Error checking manual reference."
-      );
-      setShowNewProductForm(true);
-      setNewProduct({
-        ...newProduct,
-        barcode: pendingSku,
-        manualRef: manualRef,
-        qcFlaw,
-      });
+      if (err.response?.data?.match === false) {
+        setMessage(err.response.data.message || "Manual reference not found.");
+        setShowNewProductForm(true);
+        setNewProduct({
+          barcode: pendingSku,
+          description: "",
+          size: "",
+          price: "",
+          qcFlaw: qcFlaw,
+          manualRef: manualRef,
+          mfr: "",
+        });
+      } else if (err.response?.data?.error?.includes("No deal found for this session")) {
+        console.log("Session expired during manual reference, attempting to restore...");
+        setMessage("Session expired, restoring session...");
+        
+        try {
+          // Use the new session restore endpoint instead of just tracking number
+          await axios.post(`${apiUrl}/api/session/restore`, {
+            sessionId,
+            trackingNumber,
+            scannedItems,
+            totalPrice
+          });
+          
+          setMessage("Session restored! Retrying manual reference...");
+          
+          // Now retry the original manual reference submission
+          const retryRes = await axios.post(`${apiUrl}/api/barcode/manual`, {
+            barcode: pendingSku === "NO_BARCODE" ? null : pendingSku,
+            manualRef,
+            sessionId,
+            qcFlaw,
+            serialNumber,
+            quantity,
+          });
+
+          // Handle the successful retry response
+          if (retryRes.data.match) {
+            setMessage(retryRes.data.message || "Success!");
+            setPrice(retryRes.data.price);
+            setTotalPrice(totalPrice + (retryRes.data.price || 0) * quantity);
+            setSpreadsheetMatch(retryRes.data.spreadsheetMatch);
+            setDescriptionResult(retryRes.data.descriptionResult);
+
+            // Add to scanned items and reset form
+            const newItem = {
+              sku: pendingSku === "NO_BARCODE" ? "" : pendingSku,
+              description: retryRes.data.descriptionResult?.description || pendingSku,
+              price: retryRes.data.price || 0,
+              quantity: quantity,
+              qcFlaw: qcFlaw,
+              serialNumber: serialNumber,
+              manualRef: manualRef,
+              size: retryRes.data.descriptionResult?.size || "",
+              collection: retryRes.data.spreadsheetMatch ? "Found via Manual Ref" : "Unknown",
+              timestamp: new Date().toISOString(),
+            };
+            setScannedItems(prev => [...prev, newItem]);
+
+            setSku("");
+            setQuantity(1);
+            setRequireSerial(false);
+            setSerialNumber("");
+            setSelectedMachine("");
+            setQcFlaw("none");
+            setShowManualRef(false);
+            setManualRef("");
+            setPendingSku("");
+          } else {
+            setMessage(retryRes.data.message || "Manual reference not found.");
+            setShowNewProductForm(true);
+            setNewProduct({
+              barcode: pendingSku,
+              description: "",
+              size: "",
+              price: "",
+              qcFlaw: qcFlaw,
+              manualRef: manualRef,
+              mfr: "",
+            });
+          }
+          
+        } catch (retryErr) {
+          console.error("Failed to restore session and retry manual reference:", retryErr);
+          setMessage("Failed to restore session. Please re-enter tracking number.");
+          setDealFound(false); // Reset so user can re-enter tracking number
+        }
+      } else {
+        setMessage(err.response?.data?.error || "Failed to process manual reference.");
+      }
     }
   };
 
   const handleNewProductSubmit = async (e) => {
     e.preventDefault();
+    setMessage("Adding new product...");
     try {
       const res = await axios.post(`${apiUrl}/api/product/new`, {
-        ...newProduct,
-        quantity,
-        sessionId,
-      });
-      setMessage(res.data.message || "Product added to inventory and month end collections!");
-      setShowNewProductForm(false);
-      setQuantity(1);
-      setPrice(res.data.price || Number(newProduct.price));
-      setTotalPrice((prev) => prev + ((res.data.price || Number(newProduct.price)) * quantity));
-      
-      // Add to scannedItems
-      setScannedItems((prev) => [...prev, {
-        upc: newProduct.barcode,
+        barcode: (newProduct.barcode || pendingSku) === "NO_BARCODE" ? null : (newProduct.barcode || pendingSku),
         description: newProduct.description,
-        price: res.data.price || Number(newProduct.price),
+        size: newProduct.size,
+        price: newProduct.price,
+        qcFlaw: newProduct.qcFlaw,
+        manualRef: newProduct.manualRef,
+        mfr: newProduct.mfr,
+        sessionId,
+        quantity,
+      });
+
+      setMessage(res.data.message || "Product added successfully!");
+      setPrice(res.data.price);
+      setTotalPrice(totalPrice + (res.data.price || 0) * quantity);
+
+      // Add to scanned items
+      const newItem = {
+        sku: (newProduct.barcode || pendingSku) === "NO_BARCODE" ? "" : (newProduct.barcode || pendingSku),
+        description: newProduct.description,
+        price: res.data.price || 0,
+        quantity: quantity,
         qcFlaw: newProduct.qcFlaw,
         serialNumber: serialNumber,
-        quantity: quantity,
         manualRef: newProduct.manualRef,
-        isNewProduct: true
-      }]);
-      
+        size: newProduct.size || "",
+        isNew: true,
+        collection: newProduct.mfr && (newProduct.mfr.toUpperCase() === "RESMED" || newProduct.mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock",
+        timestamp: new Date().toISOString(),
+      };
+      setScannedItems(prev => [...prev, newItem]);
+
+      setShowNewProductForm(false);
       setNewProduct({
         barcode: "",
         description: "",
         size: "",
         price: "",
         qcFlaw: "none",
-        manualRef: "", // <-- change from serialNumber to manualRef
+        manualRef: "",
         mfr: "",
       });
-      setQcFlaw("none"); // <-- Add this line
-      setSerialNumber(""); // Clear serial number
-      setShowManualRef(false); // Clear manual ref form
-      setManualRef(""); // Clear manual ref
-      setPendingSku(""); // Clear pending SKU
+      setShowManualRef(false);
+      setManualRef("");
+      setPendingSku("");
+      setQuantity(1);
+      setRequireSerial(false);
+      setSerialNumber("");
+      setQcFlaw("none");
     } catch (err) {
-      setMessage(err.response?.data?.error || "Failed to add new product.");
-    }
-  };
+      if (err.response?.data?.error?.includes("No deal found for this session")) {
+        console.log("Session expired during new product creation, attempting to restore...");
+        setMessage("Session expired, restoring session...");
+        
+        try {
+          // Use the new session restore endpoint instead of just tracking number
+          await axios.post(`${apiUrl}/api/session/restore`, {
+            sessionId,
+            trackingNumber,
+            scannedItems,
+            totalPrice
+          });
+          
+          setMessage("Session restored! Retrying new product creation...");
+          
+          // Now retry the new product submission
+          const retryRes = await axios.post(`${apiUrl}/api/product/new`, {
+            barcode: (newProduct.barcode || pendingSku) === "NO_BARCODE" ? null : (newProduct.barcode || pendingSku),
+            description: newProduct.description,
+            size: newProduct.size,
+            price: newProduct.price,
+            qcFlaw: newProduct.qcFlaw,
+            manualRef: newProduct.manualRef,
+            mfr: newProduct.mfr,
+            sessionId,
+            quantity,
+          });
 
-  // Add undo function
-  const handleUndo = async () => {
-    if (!dealFound) {
-      setMessage("No active session to undo from");
-      return;
-    }
+          setMessage(retryRes.data.message || "New product added successfully!");
+          setPrice(retryRes.data.price);
+          setTotalPrice(totalPrice + (retryRes.data.price || 0) * quantity);
 
-    try {
-      setMessage("Processing undo...");
-      const res = await axios.post(`${apiUrl}/api/barcode/undo`, {
-        sessionId
-      });
-      
-      if (res.data.action === "clearPendingState") {
-        // Handle clearing pending states (manual ref or new product forms)
-        if (res.data.pendingType === "manualReference") {
-          setShowManualRef(false);
-          setManualRef("");
-          setPendingSku("");
-          setSku("");
-          setMessage(`Cancelled manual reference for: ${res.data.clearedSku}`);
-        } else if (res.data.pendingType === "newProduct") {
+          // Add to scanned items and reset form
+          const newItem = {
+            sku: (newProduct.barcode || pendingSku) === "NO_BARCODE" ? "" : (newProduct.barcode || pendingSku),
+            description: newProduct.description,
+            price: retryRes.data.price || 0,
+            quantity: quantity,
+            qcFlaw: newProduct.qcFlaw,
+            serialNumber: serialNumber,
+            manualRef: newProduct.manualRef,
+            size: newProduct.size || "",
+            isNew: true,
+            collection: newProduct.mfr && (newProduct.mfr.toUpperCase() === "RESMED" || newProduct.mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock",
+            timestamp: new Date().toISOString(),
+          };
+          setScannedItems(prev => [...prev, newItem]);
+
           setShowNewProductForm(false);
-          setShowManualRef(false);
-          setManualRef("");
-          setPendingSku("");
-          setSku("");
           setNewProduct({
             barcode: "",
             description: "",
@@ -434,48 +743,52 @@ function App() {
             manualRef: "",
             mfr: "",
           });
-          setMessage(`Cancelled new product form for: ${res.data.clearedSku}`);
+          setShowManualRef(false);
+          setManualRef("");
+          setPendingSku("");
+          setQuantity(1);
+          setRequireSerial(false);
+          setSerialNumber("");
+          setQcFlaw("none");
+          
+        } catch (retryErr) {
+          console.error("Failed to restore session and retry new product creation:", retryErr);
+          setMessage("Failed to restore session. Please re-enter tracking number.");
+          setDealFound(false); // Reset so user can re-enter tracking number
         }
-      } else if (res.data.action === "undoLastScan") {
-        // Handle undoing completed scans
-        const undonePriceValue = Number(res.data.undoneItem.price) || 0;
-        const undoneQuantity = Number(res.data.undoneItem.quantity) || 1;
-        if (res.data.undoneItem.qcFlaw !== "flaw") {
-          setTotalPrice(prev => Math.max(0, prev - (undonePriceValue * undoneQuantity)));
-        }
-        
-        // Remove from scannedItems list
-        setScannedItems(prev => prev.slice(0, -1));
-        
-        setMessage(`Undone: ${res.data.undoneItem.description} (${res.data.remainingItems} items remaining)`);
+      } else {
+        setMessage(err.response?.data?.error || "Failed to add new product.");
       }
-      
-      // Clear any current form state
-      setSku("");
-      setPrice(null);
-      setDescriptionResult("");
-      setQcFlaw("none");
-      setSerialNumber("");
-      setQuantity(1);
-      
-    } catch (err) {
-      setMessage(err.response?.data?.error || "Failed to undo last scan");
     }
   };
 
-  // Table data selection
-  let tableData = [];
-  if (selectedCollection === "inventory") tableData = inventoryData;
-  else if (selectedCollection === "overstock") tableData = overstockData;
-  else if (selectedCollection === "machineSpecifics")
-    tableData = machineSpecificsData;
-
-  const fieldOrders = {
-    inventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Date"],
-    overstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Date"],
-    machineSpecifics: ["Name", "UPC", "SerialNumber", "Quantity", "Date"], // adjust as needed
+  const handleUndo = async () => {
+    try {
+      const res = await axios.post(`${apiUrl}/api/barcode/undo`, {
+        sessionId,
+      });
+      
+      setMessage(res.data.message || "Last scan undone successfully");
+      
+      // Remove the last item from scanned items
+      if (scannedItems.length > 0) {
+        const lastItem = scannedItems[scannedItems.length - 1];
+        setScannedItems(prev => prev.slice(0, -1));
+        setTotalPrice(prev => prev - (lastItem.price * lastItem.quantity));
+      }
+      
+      // Clear any pending states
+      setShowManualRef(false);
+      setManualRef("");
+      setPendingSku("");
+      setShowNewProductForm(false);
+      setSpreadsheetMatch(null);
+      setDescriptionResult("");
+      setPrice(null);
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to undo last scan.");
+    }
   };
-  const currentFieldOrder = fieldOrders[selectedCollection] || [];
 
   return (
     <div className="min-h-screen w-full bg-base-200 flex">
@@ -525,6 +838,8 @@ function App() {
                 setQcFlaw={setQcFlaw}
                 quantity={quantity}
                 setQuantity={setQuantity}
+                onManualEntry={handleManualEntry}
+                onNoBarcodeEntry={handleNoBarcodeEntry}
               />              {showManualRef && (
                 <ManualRefForm
                   manualRef={manualRef}
@@ -544,17 +859,35 @@ function App() {
               <button
                 className="btn btn-secondary w-full mb-4"
                 onClick={async () => {
-                  if (trackingNumber) {
+                  if (trackingNumber && scannedItems.length > 0) {
                     try {
+                      setMessage("Finalizing previous batch and submitting to Pipedrive...");
+                      
+                      // First restore the session to ensure backend has the data
+                      await axios.post(`${apiUrl}/api/session/restore`, {
+                        sessionId,
+                        trackingNumber,
+                        scannedItems,
+                        totalPrice
+                      });
+                      
+                      // Then submit the current tracking to finalize and send to Pipedrive
                       await axios.post(`${apiUrl}/api/barcode`, {
                         scanType: "tracking",
                         barcode: trackingNumber,
                         sessionId,
                       });
+                      
+                      setMessage("Previous batch submitted to Pipedrive successfully!");
                     } catch (err) {
+                      console.error("Failed to finalize previous tracking batch:", err);
                       setMessage("Failed to finalize previous tracking batch.");
                     }
                   }
+                  
+                  // Clear workflow state
+                  clearWorkflowState();
+                  
                   setDealFound(false);
                   setTrackingNumber("");
                   setSku("");
@@ -606,93 +939,132 @@ function App() {
               Total Price: ${totalPrice.toFixed(2)}
             </div>
           )}
-          
-          {/* Scanned Items Summary */}
-          {scannedItems.length > 0 && (
-            <div className="mb-4">
-              <h3 className="font-bold mb-2">
-                Scanned Items ({scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items)
-              </h3>
-              <div className="max-h-40 overflow-y-auto">
-                {scannedItems.map((item, index) => (
-                  <div key={index} className="text-sm mb-1">
-                    {item.description}
-                    {item.quantity && item.quantity > 1 ? ` (x${item.quantity})` : ""}
-                    {item.isMachine && item.serialNumber ? ` Serial: ${item.serialNumber}` : ""}
-                    {item.manualRef ? ` Ref: ${item.manualRef}` : ""}
-                    {item.isNewProduct ? " (New)" : ""}
-                    {item.qcFlaw && item.qcFlaw !== "none" ? ` [${item.qcFlaw}]` : ""}
-                    - ${item.price}
-                    {item.quantity && item.quantity > 1 ? ` (Total: $${(item.price * item.quantity).toFixed(2)})` : ""}
-                  </div>
-                ))}
-              </div>
-              <div className="font-bold mt-2">
-                Total: ${scannedItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0).toFixed(2)}
-              </div>
-            </div>
-          )}
-          
-          {/* Month End Inventory Link */}
-          <div className="mt-4">
-            <a 
-              href="/month-end-inventory" 
-              className="btn btn-outline btn-secondary w-full"
-            >
-              📊 Month End Inventory
-            </a>
-          </div>
         </div>
       </div>
       <div className="bg-base-100 rounded-xl shadow-lg p-6 w-[70%]">
-        <h2 className="text-2xl font-bold mb-4">Data Viewer</h2>
-        <div className="mb-4">
-          <label className="font-semibold mr-2">Select data:</label>
-          <select
-            className="select select-bordered"
-            value={selectedCollection}
-            onChange={(e) => setSelectedCollection(e.target.value)}
-          >
-            <option value="inventory">Inventory</option>
-            <option value="overstock">Overstock</option>
-            <option value="machineSpecifics">Machine Specifics</option>
-          </select>
-        </div>
-        <div className="overflow-x-auto max-h-[70vh]">
-          <table className="table table-xs border border-base-content border-solid">
-            <thead>
-              <tr>
-                {currentFieldOrder.map((field) => (
-                  <th
-                    key={field}
-                    className="border border-base-content border-solid bg-base-100 text-base-content"
-                  >
-                    {field}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.map((row, i) => (
-                <tr key={i}>
-                  {currentFieldOrder.map((field, j) => (
-                    <td
-                      key={j}
-                      className="border border-base-content border-solid bg-base-100 text-base-content"
-                    >
-                      {row[field] !== undefined ? row[field] : "N/A"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {tableData.length === 0 && (
-            <div className="text-base-content opacity-60 text-center mt-4">
-              No data to display.
+        <h2 className="text-2xl font-bold mb-4">Scanning Summary</h2>
+        
+        {/* Status Information */}
+        {message && (
+          <div className="alert alert-info mb-4">{message}</div>
+        )}
+        
+        {spreadsheetMatch !== null && (
+          <div className="mb-4 p-4 bg-base-200 rounded">
+            <div className="text-lg font-semibold">
+              Spreadsheet Match:{" "}
+              <span
+                className={
+                  spreadsheetMatch
+                    ? "text-success font-semibold"
+                    : "text-error font-semibold"
+                }
+              >
+                {spreadsheetMatch ? "Yes" : "No"}
+              </span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+        
+        {descriptionResult && descriptionResult.description && (
+          <div className="alert alert-success mb-4">
+            <strong>Product Description:</strong> {descriptionResult.description}
+          </div>
+        )}
+        
+        {typeof price === "number" && !isNaN(price) && (
+          <div className="alert alert-info mb-4">
+            <strong>Last Item Price:</strong> ${price.toFixed(2)}
+          </div>
+        )}
+        
+        {typeof totalPrice === "number" && !isNaN(totalPrice) && totalPrice > 0 && (
+          <div className="alert alert-warning mb-4">
+            <strong>Total Batch Price:</strong> ${totalPrice.toFixed(2)}
+          </div>
+        )}
+        
+        {/* Scanned Items Summary */}
+        {scannedItems.length > 0 ? (
+          <div className="mb-4">
+            <h3 className="text-xl font-bold mb-4 text-primary">
+              Scanned Items ({scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items)
+            </h3>
+            <div className="max-h-[60vh] overflow-y-auto">
+              <div className="space-y-3">
+                {scannedItems.map((item, index) => (
+                  <div key={index} className="p-4 bg-base-200 rounded-lg border">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="font-semibold text-lg text-base-content">
+                          {item.description}
+                        </div>
+                        <div className="text-sm text-base-content/70 mt-1">
+                          SKU: {item.sku || "N/A"}
+                          {item.size && ` • Size: ${item.size}`}
+                          {item.serialNumber && ` • Serial: ${item.serialNumber}`}
+                          {item.manualRef && ` • Ref: ${item.manualRef}`}
+                        </div>
+                        {(item.qcFlaw && item.qcFlaw !== "none") && (
+                          <div className="badge badge-warning mt-2">
+                            {item.qcFlaw}
+                          </div>
+                        )}
+                        {item.isNew && (
+                          <div className="badge badge-success mt-2 ml-2">
+                            New Product
+                          </div>
+                        )}
+                        {item.isMachine && (
+                          <div className="badge badge-info mt-2 ml-2">
+                            Machine
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right ml-4">
+                        <div className="text-lg font-bold text-success">
+                          ${item.price?.toFixed(2) || "0.00"}
+                        </div>
+                        {item.quantity && item.quantity > 1 && (
+                          <div className="text-sm text-base-content/70">
+                            Qty: {item.quantity}
+                          </div>
+                        )}
+                        {item.quantity && item.quantity > 1 && (
+                          <div className="text-sm font-semibold text-primary">
+                            Total: ${((item.price || 0) * item.quantity).toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-xs text-base-content/50 mt-2">
+                      {new Date(item.timestamp).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-4 p-4 bg-primary text-primary-content rounded-lg">
+              <div className="flex justify-between items-center">
+                <span className="text-lg font-semibold">Batch Total:</span>
+                <span className="text-2xl font-bold">
+                  ${scannedItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="text-sm opacity-80 mt-1">
+                {scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items total
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="text-6xl opacity-20 mb-4">📦</div>
+            <div className="text-xl text-base-content/60">No items scanned yet</div>
+            <div className="text-sm text-base-content/40 mt-2">
+              Scan a tracking number to get started
+            </div>
+          </div>
+        )}
         {showNewProductForm && (
           <form
             onSubmit={handleNewProductSubmit}
@@ -763,8 +1135,9 @@ function App() {
               <option value="damaged">Damaged</option>
               <option value="donotaccept">Do Not Accept</option>
               <option value="tornpackaging">Torn Packaging</option>
-              <option value="other">Not in Original Packaging</option>
-              <option value="yellow">Yellow</option> 
+              <option value="notoriginalpackaging">Not in Original Packaging</option>
+              <option value="yellow">Yellow</option>
+              <option value="other">Other</option> 
             </select>
             <button className="btn btn-primary w-full" type="submit">
               Add Product

@@ -17,6 +17,7 @@
     "daisyui": "^5.0.37",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "pip": "^0.0.1",
     "string-similarity": "^4.0.4",
     "xlsx": "^0.18.5"
   },

@@ -51,31 +51,29 @@ const priceRules = [
 // New function to get price from database or fallback to pricing rules
 export function getPriceFromDatabase(product, name, flaw) {
   // First check if the product has a price in the database
-  if (product && product.Price) {
+  if (product && product.Price !== undefined && product.Price !== undefined) {
     const dbPrice = product.Price; // Now it's already a Number
-    if (dbPrice > 0) {
-      // Apply flaw adjustments to database price
-      if (flaw !== "none") {
-        // Check if it's a machine by looking at product name/category
-        const isMachine = name && (
-          name.toLowerCase().includes("airsense") ||
-          name.toLowerCase().includes("aircurve") ||
-          name.toLowerCase().includes("trilogy") ||
-          name.toLowerCase().includes("airmini") ||
-          name.toLowerCase().includes("astral") ||
-          name.toLowerCase().includes("series 9") ||
-          name.toLowerCase().includes("coughassist") ||
-          name.toLowerCase().includes("oxygen concentrator")
-        );
-        
-        if (isMachine) {
-          return dbPrice * 0.5; // Half price for flawed machines
-        } else {
-          return 0; // No value for flawed supplies
-        }
+    // Apply flaw adjustments to database price
+    if (flaw !== "none") {
+      // Check if it's a machine by looking at product name/category
+      const isMachine = name && (
+        name.toLowerCase().includes("airsense") ||
+        name.toLowerCase().includes("aircurve") ||
+        name.toLowerCase().includes("trilogy") ||
+        name.toLowerCase().includes("airmini") ||
+        name.toLowerCase().includes("astral") ||
+        name.toLowerCase().includes("series 9") ||
+        name.toLowerCase().includes("coughassist") ||
+        name.toLowerCase().includes("oxygen concentrator")
+      );
+      
+      if (isMachine) {
+        return dbPrice * 0.5; // Half price for flawed machines
+      } else {
+        return 0; // No value for flawed supplies
       }
-      return dbPrice;
     }
+    return dbPrice;
   }
   
   // Fallback to pricing rules (mainly for machines without DB prices)

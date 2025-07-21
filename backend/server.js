@@ -23,6 +23,7 @@ import Overstock from "./models/Overstock.js";
 import MachineSpecific from "./models/MachineSpecific.js";
 import MonthEndInventory from "./models/MonthEndInventory.js";
 import MonthEndOverstock from "./models/MonthEndOverstock.js";
+import MagentoInventory from "./models/MagentoInventory.js";
 import path from "path";
 
 dotenv.config();
@@ -133,7 +134,7 @@ function qcFlawLabel(value) {
       return "Missing Part";
     case "damaged":
       return "Damaged";
-    case "other":
+    case "notoriginalpackaging":
       return "Not in Original Packaging";
     case "donotaccept":
       return "Do not accept";
@@ -141,12 +142,94 @@ function qcFlawLabel(value) {
       return "Torn Packaging";
     case "yellow":
       return "Yellow";
+    case "other":
+      return "Other";
     default:
       return "No Flaw";
   }
 }
 
 // --- Routes ---
+
+// Session restoration endpoint to sync frontend localStorage with backend session
+app.post("/api/session/restore", async (req, res) => {
+  const { sessionId, trackingNumber, scannedItems, totalPrice } = req.body;
+  
+  console.log("🔄 SESSION RESTORE REQUEST:", { sessionId, trackingNumber, itemCount: scannedItems?.length, totalPrice });
+  
+  if (!sessionId || !trackingNumber) {
+    return res.status(400).json({ error: "sessionId and trackingNumber are required" });
+  }
+
+  try {
+    // Find the deal ID for the tracking number
+    const dealId = await findDealIdByTrackingNumber(trackingNumber);
+    if (!dealId) {
+      console.log("❌ Deal not found for tracking number:", trackingNumber);
+      return res.status(404).json({ error: "Deal not found for tracking number" });
+    }
+
+    console.log("✅ Deal found:", dealId);
+
+    // Restore the session with the provided data
+    const restoredSession = {
+      dealId,
+      noteContent: [],
+      prices: [],
+      skuEntries: []
+    };
+
+    // Rebuild noteContent, prices, and properly formatted skuEntries from scannedItems
+    if (scannedItems && scannedItems.length > 0) {
+      console.log("📦 Processing", scannedItems.length, "scanned items for restoration");
+      
+      for (const item of scannedItems) {
+        const noteContent = `${item.isMachine ? 'Machine' : 'SKU'}: ${item.sku}${
+          item.description ? ` - ${item.description}` : ''
+        }${item.size ? ` Size: ${item.size}` : ''}${
+          item.qcFlaw && item.qcFlaw !== 'none' ? ` [Flaw: ${qcFlawLabel(item.qcFlaw)}]` : ''
+        }${item.serialNumber ? ` Serial: ${item.serialNumber}` : ''}. Price: $${item.price}${
+          item.quantity > 1 ? ` x ${item.quantity}` : ''
+        }`;
+        
+        restoredSession.noteContent.push(noteContent);
+        restoredSession.prices.push(item.price * (item.quantity || 1));
+        
+        // Convert frontend scannedItem format to backend skuEntry format
+        restoredSession.skuEntries.push({
+          description: item.description || item.sku,
+          size: item.size || "",
+          qcFlaw: item.qcFlaw || "none",
+          serialNumber: item.serialNumber || "",
+          price: item.price || 0,
+          quantity: item.quantity || 1,
+          upc: item.sku || "",
+          isManual: item.isNew || item.manualRef ? true : false,
+          isMachine: item.isMachine || false,
+          collection: item.collection || (item.isMachine ? "Machine" : "Unknown")
+        });
+      }
+    }
+
+    console.log("💾 Saving restored session:", {
+      dealId,
+      noteContentLines: restoredSession.noteContent.length,
+      pricesCount: restoredSession.prices.length,
+      skuEntriesCount: restoredSession.skuEntries.length
+    });
+
+    await setSession(sessionId, restoredSession);
+
+    return res.json({ 
+      message: "Session restored successfully",
+      dealId,
+      itemCount: scannedItems ? scannedItems.length : 0
+    });
+  } catch (error) {
+    console.error("❌ Error restoring session:", error);
+    return res.status(500).json({ error: "Failed to restore session" });
+  }
+});
 
 // Barcode scan handler
 app.post("/api/barcode", async (req, res) => {
@@ -161,12 +244,21 @@ app.post("/api/barcode", async (req, res) => {
   try {
     if (scanType === "tracking") {
       const oldSession = await getSession(sessionId);
+      console.log("🔄 TRACKING SCAN - OLD SESSION CHECK:", {
+        hasSession: !!oldSession,
+        hasSkuEntries: !!(oldSession?.skuEntries),
+        skuEntriesCount: oldSession?.skuEntries?.length || 0,
+        hasDealId: !!oldSession?.dealId,
+        dealId: oldSession?.dealId
+      });
+      
       if (
         oldSession &&
         oldSession.skuEntries &&
         oldSession.skuEntries.length > 0 &&
         oldSession.dealId
       ) {
+        console.log("📋 SUBMITTING TO PIPEDRIVE:", oldSession.skuEntries.length, "items for deal", oldSession.dealId);
         // Group items by description, size, flaw, and serialNumber (if present)
         const grouped = {};
 
@@ -210,12 +302,16 @@ app.post("/api/barcode", async (req, res) => {
           .filter(Boolean)
           .join("\n");
 
-        console.log("Attempting to add note to Pipedrive:");
+        console.log("📝 Attempting to add note to Pipedrive:");
         console.log("- Deal ID:", oldSession.dealId);
         console.log("- Token exists:", PIPEDRIVE_API_TOKEN ? "✅ Yes" : "❌ No");
         console.log("- Content length:", allNotesWithTotal.length);
+        console.log("- Note content preview:", allNotesWithTotal.substring(0, 200) + "...");
 
         await addNoteToPipedrive(allNotesWithTotal, oldSession.dealId, PIPEDRIVE_API_TOKEN);
+        console.log("✅ Successfully submitted note to Pipedrive!");
+      } else {
+        console.log("⚪ No previous session to submit to Pipedrive");
       }
       // Now reset for new tracking number
       const trackingNumber = await extractTrackingNumberfromBarcode(barcode);
@@ -447,10 +543,10 @@ app.post("/api/barcode/manual", async (req, res) => {
     qcFlaw,
     quantity = 1,
   } = req.body;
-  if (!barcode || !manualRef || !sessionId) {
+  if (!manualRef || !sessionId) {
     return res
       .status(400)
-      .json({ error: "barcode, manualRef, and sessionId are required" });
+      .json({ error: "manualRef and sessionId are required" });
   }
 
   const currentSession = await getSession(sessionId);
@@ -471,7 +567,7 @@ app.post("/api/barcode/manual", async (req, res) => {
     let calculatedPrice = 0;
     calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
-    const noteContent = `SKU scanned: ${barcode}. Spreadsheet match: ${
+    const noteContent = `${barcode ? `SKU scanned: ${barcode}` : "No barcode available"}. Spreadsheet match: ${
       matchResult.file
     } - ${
       matchResult.row[matchResult.matchedColumn]
@@ -521,7 +617,7 @@ app.post("/api/barcode/manual", async (req, res) => {
           Quantity: 0 // Set to 0 for new items from regular workflow
         },
         $set: { 
-          UPC: barcode,
+          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
         }
@@ -540,14 +636,16 @@ app.post("/api/barcode/manual", async (req, res) => {
         matchedColumn: matchResult.matchedColumn,
         rowValue: matchResult.row,
         properValue: matchResult.row[matchResult.matchedColumn],
-        upc: barcode,
+        upc: barcode || "", // Pass empty string if no barcode
       });
-      await writeUPCToMongoDB({
-        collection: matchResult.collection,
-        matchedColumn: matchResult.matchedColumn,
-        rowValue: matchResult.row[matchResult.matchedColumn],
-        upc: barcode,
-      });
+      if (barcode) { // Only write UPC if barcode exists
+        await writeUPCToMongoDB({
+          collection: matchResult.collection,
+          matchedColumn: matchResult.matchedColumn,
+          rowValue: matchResult.row[matchResult.matchedColumn],
+          upc: barcode,
+        });
+      }
     } catch (error) {
       console.error("Error writing to spreadsheet or adding note:", error);
       return res
@@ -648,8 +746,8 @@ app.post("/api/barcode/undo", async (req, res) => {
 // Add new product to main inventory/overstock and Month End collections
 app.post("/api/product/new", async (req, res) => {
   const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr, quantity = 1 } = req.body;
-  if (!barcode || !description || !sessionId) {
-    return res.status(400).json({ error: "barcode, description, and sessionId are required" });
+  if (!description || !sessionId) {
+    return res.status(400).json({ error: "description and sessionId are required" });
   }
 
   try {
@@ -664,7 +762,7 @@ app.post("/api/product/new", async (req, res) => {
     if (isInventoryItem) {
       newProduct = new Inventory({
         RefNum: manualRef || "",
-        UPC: barcode,
+        ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
         Style: description,
         Size: size || "",
         MFR: mfr,
@@ -675,7 +773,7 @@ app.post("/api/product/new", async (req, res) => {
     } else {
       newProduct = new Overstock({
         RefNum: manualRef || "",
-        UPC: barcode,
+        ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
         Style: description,
         Size: size || "",
         MFR: mfr || "Unknown",
@@ -691,10 +789,12 @@ app.post("/api/product/new", async (req, res) => {
     const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
     const monthEndProduct = await monthEndCollection.findOneAndUpdate(
       {
-        // Use RefNum as primary key if provided, otherwise use UPC
+        // Use RefNum as primary key if provided, otherwise use UPC (if available)
         ...(manualRef ? 
           { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
-          { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") }
+          barcode ? 
+            { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
+            { Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } // No primary key fallback
         )
       },
       {
@@ -703,7 +803,7 @@ app.post("/api/product/new", async (req, res) => {
           Quantity: 0 // Set to 0 for new items from regular workflow
         },
         $set: { 
-          UPC: barcode,
+          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
         }
@@ -732,7 +832,7 @@ app.post("/api/product/new", async (req, res) => {
       price: calculatedPrice,
       quantity: quantity, // Add quantity field
       isManual: true,
-      upc: barcode,
+      upc: barcode || "", // Use empty string if no barcode
       collection: isInventoryItem ? "Inventory" : "Overstock",
     });
     await setSession(sessionId, currentSession);
@@ -815,6 +915,75 @@ app.get("/api/month-end-overstock", async (req, res) => {
   } catch (err) {
     console.error("Error fetching month end overstock:", err);
     res.status(500).json({ error: "Failed to fetch month end overstock data" });
+  }
+});
+
+// MagentoInventory API endpoints
+app.get("/api/magento-inventory", async (req, res) => {
+  try {
+    console.log("Attempting to fetch Magento Inventory data...");
+    console.log("MagentoInventory model collection name:", MagentoInventory.collection.name);
+    
+    const magentoInventoryData = await MagentoInventory.find();
+    console.log("Found Magento Inventory documents:", magentoInventoryData.length);
+    console.log("Sample document:", magentoInventoryData[0]);
+    
+    // Convert Decimal128 Price values to numbers for frontend
+    const processedData = magentoInventoryData.map(item => ({
+      ...item.toObject(),
+      Price: item.Price ? parseFloat(item.Price.toString()) : 0
+    }));
+    
+    res.json({ data: processedData });
+  } catch (err) {
+    console.error("Error fetching magento inventory:", err);
+    res.status(500).json({ error: "Failed to fetch magento inventory data" });
+  }
+});
+
+// Magento Inventory CSV export endpoint
+app.get("/api/magento-inventory/export-csv", async (req, res) => {
+  try {
+    console.log("CSV Export request received for Magento Inventory");
+    const magentoInventoryData = await MagentoInventory.find();
+    console.log("Found documents for export:", magentoInventoryData.length);
+    
+    // Define CSV headers
+    const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"];
+    
+    // Convert data to CSV format
+    let csvContent = headers.join(",") + "\n";
+    
+    if (magentoInventoryData.length === 0) {
+      console.log("No data found, returning empty CSV with headers");
+    } else {
+      magentoInventoryData.forEach(item => {
+        const row = [
+          `"${item.RefNum || ""}"`,
+          `"${item.UPC || ""}"`,
+          `"${item.MFR || ""}"`,
+          `"${item.Style || ""}"`,
+          `"${item.Size || ""}"`,
+          item.Quantity || 0,
+          item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+          `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
+          `"${item.QcFlaw || ""}"`,
+          `"${item.SerialNumber || ""}"`,
+          `"${item.Source || ""}"`
+        ];
+        csvContent += row.join(",") + "\n";
+      });
+    }
+    
+    // Set headers for file download
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=magento_inventory_export.csv");
+    
+    console.log("Sending CSV response");
+    res.send(csvContent);
+  } catch (err) {
+    console.error("Error exporting Magento inventory to CSV:", err);
+    res.status(500).json({ error: "Failed to export Magento inventory data" });
   }
 });
 
@@ -992,6 +1161,32 @@ app.post("/api/month-end/barcode", async (req, res) => {
           }
         );
 
+        // Also save machine to MagentoInventory collection
+        await MagentoInventory.findOneAndUpdate(
+          {
+            UPC: barcode,
+            Style: barcode,
+            Size: "",
+            MFR: "Machine"
+          },
+          {
+            $inc: { Quantity: 1 },
+            $set: { 
+              RefNum: "",
+              Date: new Date(),
+              Price: machinePrice,
+              QcFlaw: qcFlaw || "none",
+              SerialNumber: serialNumber || "",
+              Source: "month-end"
+            }
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true
+          }
+        );
+
         if (!currentSession.prices) currentSession.prices = [];
         currentSession.prices.push(machinePrice);
 
@@ -1080,6 +1275,32 @@ app.post("/api/month-end/barcode", async (req, res) => {
         }
       );
 
+      // Also save to MagentoInventory collection
+      await MagentoInventory.findOneAndUpdate(
+        {
+          UPC: upc,
+          Style: result.row.Description || result.row.Name || result.row.Style || "",
+          Size: result.row.Size || "",
+          MFR: result.row.MFR || result.collection
+        },
+        {
+          $inc: { Quantity: quantity },
+          $setOnInsert: { RefNum: "" }, // Only set on insert
+          $set: { 
+            Date: new Date(),
+            Price: calculatedPrice,
+            QcFlaw: qcFlaw || "none",
+            SerialNumber: serialNumber || "",
+            Source: "month-end"
+          }
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
+
       await setSession(sessionId, currentSession);
 
       let descriptionResult;
@@ -1120,8 +1341,8 @@ app.post("/api/month-end/barcode", async (req, res) => {
 app.post("/api/month-end/barcode/manual", async (req, res) => {
   console.log("🔥 MONTH END MANUAL REFERENCE HANDLER HIT!", req.body);
   const { barcode, manualRef, sessionId, description, price, serialNumber, qcFlaw, quantity = 1 } = req.body;
-  if (!barcode || !manualRef || !sessionId) {
-    return res.status(400).json({ error: "barcode, manualRef, and sessionId are required" });
+  if (!manualRef || !sessionId) {
+    return res.status(400).json({ error: "manualRef and sessionId are required" });
   }
 
   const currentSession = await getSession(sessionId);
@@ -1138,7 +1359,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
     calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
     if (!currentSession.noteContent) currentSession.noteContent = [];
-    currentSession.noteContent.push(`SKU scanned: ${barcode}. Spreadsheet match: ${matchResult.file} - ${matchResult.row[matchResult.matchedColumn]}. Price: $${calculatedPrice}`);
+    currentSession.noteContent.push(`${barcode ? `SKU scanned: ${barcode}` : "No barcode available"}. Spreadsheet match: ${matchResult.file} - ${matchResult.row[matchResult.matchedColumn]}. Price: $${calculatedPrice}`);
 
     if (!currentSession.prices) currentSession.prices = [];
     currentSession.prices.push(calculatedPrice);
@@ -1151,7 +1372,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       serialNumber: serialNumber || "",
       price: calculatedPrice,
       quantity: quantity, // Add quantity field
-      upc: barcode,
+      upc: barcode || "", // Use empty string if no barcode
     });
 
     // Save immediately to Month End collection based on original collection - increment if exists (RefNum as primary key)
@@ -1166,9 +1387,35 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       {
         $inc: { Quantity: quantity },
         $set: { 
-          UPC: barcode,
+          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Also save to MagentoInventory collection
+    await MagentoInventory.findOneAndUpdate(
+      {
+        RefNum: manualRef || "",
+        Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+        Size: matchResult.row.Size || "",
+        MFR: matchResult.row.MFR || matchResult.collection
+      },
+      {
+        $inc: { Quantity: quantity },
+        $set: { 
+          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
+          Date: new Date(),
+          Price: calculatedPrice,
+          QcFlaw: qcFlaw || "none",
+          SerialNumber: serialNumber || "",
+          Source: "month-end-manual"
         }
       },
       {
@@ -1187,7 +1434,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
         matchedColumn: matchResult.matchedColumn,
         rowValue: matchResult.row,
         properValue: matchResult.row[matchResult.matchedColumn],
-        upc: barcode,
+        upc: barcode || "", // Pass empty string if no barcode
       });
     } catch (error) {
       console.error("Error with description result:", error);
@@ -1224,8 +1471,10 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
 // Month End new product handler
 app.post("/api/month-end/product/new", async (req, res) => {
   const { barcode, description, size, price, qcFlaw, manualRef, sessionId, serialNumber, mfr, quantity = 1 } = req.body;
-  if (!barcode || !description || !sessionId) {
-    return res.status(400).json({ error: "barcode, description, and sessionId are required" });
+  
+  // Allow null/empty barcode if manualRef is provided
+  if (!description || !sessionId || (!barcode && !manualRef)) {
+    return res.status(400).json({ error: "description, sessionId, and either barcode or manualRef are required" });
   }
 
   try {
@@ -1238,10 +1487,11 @@ app.post("/api/month-end/product/new", async (req, res) => {
     
     const newProduct = await monthEndCollection.findOneAndUpdate(
       {
-        // Use RefNum as primary key if provided, otherwise use UPC
+        // Use RefNum as primary key if provided, otherwise use UPC (only if barcode exists)
         ...(manualRef ? 
           { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr } :
-          { UPC: barcode, Style: description, Size: size || "", MFR: mfr }
+          barcode ? { UPC: barcode, Style: description, Size: size || "", MFR: mfr } :
+          { Style: description, Size: size || "", MFR: mfr } // No barcode case
         )
       },
       {
@@ -1250,9 +1500,40 @@ app.post("/api/month-end/product/new", async (req, res) => {
           ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
         },
         $set: { 
-          UPC: barcode,
+          ...(barcode ? { UPC: barcode } : {}), // Only set UPC if barcode exists
           Date: new Date(),
           Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Also save to MagentoInventory collection
+    await MagentoInventory.findOneAndUpdate(
+      {
+        // Use RefNum as primary key if provided, otherwise use UPC (only if barcode exists)
+        ...(manualRef ? 
+          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr } :
+          barcode ? { UPC: barcode, Style: description, Size: size || "", MFR: mfr } :
+          { Style: description, Size: size || "", MFR: mfr } // No barcode case
+        )
+      },
+      {
+        $inc: { Quantity: quantity },
+        $setOnInsert: { 
+          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
+        },
+        $set: { 
+          ...(barcode ? { UPC: barcode } : {}), // Only set UPC if barcode exists
+          Date: new Date(),
+          Price: calculatedPrice,
+          QcFlaw: qcFlaw || "none",
+          SerialNumber: serialNumber || "",
+          Source: "month-end-new"
         }
       },
       {
@@ -1278,7 +1559,7 @@ app.post("/api/month-end/product/new", async (req, res) => {
       price: price || 0,
       quantity: quantity, // Add quantity field
       isManual: true,
-      upc: barcode,
+      upc: barcode || null, // Handle null barcode
     });
     await setSession(sessionId, currentSession);
 
@@ -1400,6 +1681,89 @@ app.put("/api/products/:collection/:id/price", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating product price:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// General product update endpoint for all fields
+app.put("/api/products/:collection/:id", async (req, res) => {
+  try {
+    console.log("PUT request received for:", req.params.collection, req.params.id);
+    console.log("Request body:", req.body);
+    
+    const { collection, id } = req.params;
+    const updates = req.body;
+
+    // Validate collection
+    let model;
+    if (collection === 'Inventory') {
+      model = Inventory;
+    } else if (collection === 'Overstock') {
+      model = Overstock;
+    } else {
+      return res.status(400).json({ error: "Invalid collection" });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: "Invalid product ID" });
+    }
+
+    // Build update object with proper field mappings
+    const updateObj = {};
+    
+    if (updates.refNum !== undefined) updateObj.RefNum = updates.refNum;
+    if (updates.upc !== undefined) updateObj.UPC = updates.upc;
+    if (updates.mfr !== undefined) updateObj.MFR = updates.mfr;
+    if (updates.style !== undefined) updateObj.Style = updates.style;
+    if (updates.size !== undefined) updateObj.Size = updates.size;
+    if (updates.price !== undefined) {
+      const numericPrice = parseFloat(updates.price);
+      if (isNaN(numericPrice) || numericPrice < 0) {
+        return res.status(400).json({ error: "Price must be a valid non-negative number" });
+      }
+      updateObj.Price = numericPrice;
+    }
+
+    if (Object.keys(updateObj).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    const updatedProduct = await model.findByIdAndUpdate(
+      id,
+      updateObj,
+      { new: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Also update corresponding Month End collections if they exist
+    const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
+    const monthEndUpdates = {};
+    
+    // Only update Month End collections with fields that exist there
+    if (updateObj.RefNum !== undefined) monthEndUpdates.RefNum = updateObj.RefNum;
+    if (updateObj.UPC !== undefined) monthEndUpdates.UPC = updateObj.UPC;
+    if (updateObj.MFR !== undefined) monthEndUpdates.MFR = updateObj.MFR;
+    if (updateObj.Style !== undefined) monthEndUpdates.Style = updateObj.Style;
+    if (updateObj.Size !== undefined) monthEndUpdates.Size = updateObj.Size;
+    if (updateObj.Price !== undefined) monthEndUpdates.Price = updateObj.Price;
+
+    if (Object.keys(monthEndUpdates).length > 0) {
+      await monthEndModel.updateMany(
+        { RefNum: updatedProduct.RefNum },
+        { $set: monthEndUpdates }
+      );
+    }
+
+    res.json({ 
+      message: "Product updated successfully",
+      product: updatedProduct
+    });
+  } catch (error) {
+    console.error("Error updating product:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
