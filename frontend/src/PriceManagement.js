@@ -147,7 +147,13 @@ function PriceManagement() {
           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
             value === 'Inventory' 
               ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200' 
-              : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+              : value === 'Overstock'
+              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
+              : value === 'MonthEndInventory'
+              ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200'
+              : value === 'MonthEndOverstock'
+              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200'
+              : 'bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-200'
           }`}>
             {value}
           </span>
@@ -196,7 +202,7 @@ function PriceManagement() {
               onClick={() => setError('')} 
               className="text-red-800 dark:text-red-200 hover:text-red-900 dark:hover:text-red-100 text-xl font-semibold"
             >
-              ×
+              
             </button>
           </div>
         )}
@@ -229,6 +235,8 @@ function PriceManagement() {
                 <option value="all">All Collections</option>
                 <option value="Inventory">Inventory</option>
                 <option value="Overstock">Overstock</option>
+                <option value="MonthEndInventory">Month End Inventory</option>
+                <option value="MonthEndOverstock">Month End Overstock</option>
               </select>
             </div>
           </div>

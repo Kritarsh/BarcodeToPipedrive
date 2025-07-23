@@ -1514,11 +1514,33 @@ app.get("/api/products/prices", async (req, res) => {
       Price: 1
     }).lean();
 
+    const monthEndInventoryProducts = await MonthEndInventory.find({}, {
+      _id: 1,
+      RefNum: 1,
+      UPC: 1,
+      MFR: 1,
+      Style: 1,
+      Size: 1,
+      Price: 1
+    }).lean();
+
+    const monthEndOverstockProducts = await MonthEndOverstock.find({}, {
+      _id: 1,
+      RefNum: 1,
+      UPC: 1,
+      MFR: 1,
+      Style: 1,
+      Size: 1,
+      Price: 1
+    }).lean();
+
     // Add collection type to each product
     const inventoryWithType = inventoryProducts.map(p => ({ ...p, collection: 'Inventory' }));
     const overstockWithType = overstockProducts.map(p => ({ ...p, collection: 'Overstock' }));
+    const monthEndInventoryWithType = monthEndInventoryProducts.map(p => ({ ...p, collection: 'MonthEndInventory' }));
+    const monthEndOverstockWithType = monthEndOverstockProducts.map(p => ({ ...p, collection: 'MonthEndOverstock' }));
 
-    const allProducts = [...inventoryWithType, ...overstockWithType];
+    const allProducts = [...inventoryWithType, ...overstockWithType, ...monthEndInventoryWithType, ...monthEndOverstockWithType];
     res.json(allProducts);
   } catch (error) {
     console.error("Error fetching products for price management:", error);
@@ -1545,6 +1567,10 @@ app.put("/api/products/:collection/:id/price", async (req, res) => {
       model = Inventory;
     } else if (collection === 'Overstock') {
       model = Overstock;
+    } else if (collection === 'MonthEndInventory') {
+      model = MonthEndInventory;
+    } else if (collection === 'MonthEndOverstock') {
+      model = MonthEndOverstock;
     } else {
       return res.status(400).json({ error: "Invalid collection" });
     }
@@ -1559,12 +1585,14 @@ app.put("/api/products/:collection/:id/price", async (req, res) => {
       return res.status(404).json({ error: "Product not found" });
     }
 
-    // Also update corresponding Month End collections if they exist
-    const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
-    await monthEndModel.updateMany(
-      { RefNum: updatedProduct.RefNum },
-      { $set: { Price: numericPrice } }
-    );
+    // Also update corresponding collections if they exist (only for regular collections)
+    if (collection === 'Inventory' || collection === 'Overstock') {
+      const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
+      await monthEndModel.updateMany(
+        { RefNum: updatedProduct.RefNum },
+        { $set: { Price: numericPrice } }
+      );
+    }
 
     res.json({ 
       message: "Price updated successfully",
@@ -1591,6 +1619,10 @@ app.put("/api/products/:collection/:id", async (req, res) => {
       model = Inventory;
     } else if (collection === 'Overstock') {
       model = Overstock;
+    } else if (collection === 'MonthEndInventory') {
+      model = MonthEndInventory;
+    } else if (collection === 'MonthEndOverstock') {
+      model = MonthEndOverstock;
     } else {
       return res.status(400).json({ error: "Invalid collection" });
     }
