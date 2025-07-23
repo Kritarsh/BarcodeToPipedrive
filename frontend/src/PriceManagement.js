@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { api } from './api/config';
 
 function PriceManagement() {
@@ -7,35 +7,10 @@ function PriceManagement() {
   const [error, setError] = useState('');
   // Load from localStorage or use default values
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('pm_searchTerm') || '');
-  const [inputValue, setInputValue] = useState(() => localStorage.getItem('pm_searchTerm') || '');
   const [filterCollection, setFilterCollection] = useState(() => localStorage.getItem('pm_filterCollection') || 'all');
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
-
-  // Debounce function to prevent excessive search filtering
-  const debounce = useCallback((func, delay) => {
-    let timeoutId;
-    return (...args) => {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => func(...args), delay);
-    };
-  }, []);
-
-  // Debounced search term setter
-  const debouncedSetSearchTerm = useCallback(
-    debounce((value) => {
-      setSearchTerm(value);
-    }, 300),
-    [debounce]
-  );
-
-  // Handle input change with immediate visual feedback and debounced search
-  const handleSearchChange = useCallback((e) => {
-    const value = e.target.value;
-    setInputValue(value); // Immediate visual update
-    debouncedSetSearchTerm(value); // Debounced search
-  }, [debouncedSetSearchTerm]);
 
   useEffect(() => {
     fetchProducts();
@@ -45,11 +20,6 @@ function PriceManagement() {
   useEffect(() => {
     localStorage.setItem('pm_searchTerm', searchTerm);
   }, [searchTerm]);
-
-  // Save input value to localStorage for immediate persistence
-  useEffect(() => {
-    localStorage.setItem('pm_searchTerm', inputValue);
-  }, [inputValue]);
 
   // Save filter collection to localStorage whenever it changes
   useEffect(() => {
@@ -72,7 +42,8 @@ function PriceManagement() {
   };
 
   const handleEditField = (product, field, currentValue) => {
-    setEditingField({ productId: product._id, field });
+    // Use composite key: collection-id to handle duplicates between regular and month-end collections
+    setEditingField({ productId: `${product.collection}-${product._id}`, field, originalId: product._id, collection: product.collection });
     setEditValue(currentValue || '');
   };
 
@@ -81,7 +52,7 @@ function PriceManagement() {
 
     try {
       setSaving(true);
-      const product = products.find(p => p._id === editingField.productId);
+      const product = products.find(p => `${p.collection}-${p._id}` === editingField.productId);
       
       // Create update object with the edited field
       const updateData = {};
@@ -108,7 +79,7 @@ function PriceManagement() {
 
       // Update the product in the local state with proper field mapping
       setProducts(prev => prev.map(p => 
-        p._id === editingField.productId 
+        `${p.collection}-${p._id}` === editingField.productId 
           ? {
               ...p,
               // Map the backend field names to frontend expected names
@@ -164,7 +135,8 @@ function PriceManagement() {
   }, [products, searchTerm, filterCollection]);
 
   const renderEditableField = (product, field, value, isNumber = false) => {
-    const isEditing = editingField && editingField.productId === product._id && editingField.field === field;
+    const compositeId = `${product.collection}-${product._id}`;
+    const isEditing = editingField && editingField.productId === compositeId && editingField.field === field;
     
     if (isEditing) {
       return (
@@ -263,8 +235,8 @@ function PriceManagement() {
                 id="search"
                 type="text"
                 placeholder="Search by name, ref num, manufacturer, or UPC..."
-                value={inputValue}
-                onChange={handleSearchChange}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
               />
             </div>
@@ -327,7 +299,7 @@ function PriceManagement() {
               </thead>
               <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                 {filteredProducts.map((product) => (
-                  <tr key={product._id} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  <tr key={`${product.collection}-${product._id}`} className="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       {renderEditableField(product, 'collection', product.collection)}
                     </td>
