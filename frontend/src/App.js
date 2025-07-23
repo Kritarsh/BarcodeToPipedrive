@@ -335,11 +335,12 @@ function App() {
     try {
       const res = await axios.post(`${apiUrl}/api/barcode`, {
         scanType: "sku",
-        barcode: selectedMachine || sku,
+        barcode: sku, // Always use the UPC field value (which contains the serial number for machines)
         sessionId,
         qcFlaw,
         serialNumber,
         quantity,
+        machineType: selectedMachine, // Pass the machine type separately
       });
 
       // Check if the response indicates no match
@@ -347,7 +348,7 @@ function App() {
         console.log("No match found, showing manual reference form");
         setMessage(res.data.message || "SKU not found in spreadsheet.");
         setShowManualRef(true);
-        setPendingSku(selectedMachine || sku);
+        setPendingSku(sku); // Always use the UPC field value
         return;
       }
 
@@ -359,12 +360,12 @@ function App() {
 
       // Add to scanned items
       const newItem = {
-        sku: selectedMachine || sku,
-        description: res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || selectedMachine || sku,
+        sku: sku, // For machines: this is the serial number; for supplies: this is the UPC
+        description: selectedMachine || res.data.row?.Description || res.data.row?.Name || res.data.row?.Style || sku,
         price: res.data.price || 0,
         quantity: quantity,
         qcFlaw: qcFlaw,
-        serialNumber: serialNumber,
+        serialNumber: selectedMachine ? sku : serialNumber, // For machines, the serial is in the UPC field
         size: res.data.row?.Size || "",
         isMachine: !!selectedMachine,
         collection: res.data.spreadsheetMatch,
@@ -400,11 +401,12 @@ function App() {
           // Now retry the original SKU submission
           const retryRes = await axios.post(`${apiUrl}/api/barcode`, {
             scanType: "sku",
-            barcode: selectedMachine || sku,
+            barcode: sku, // Always use the UPC field value
             sessionId,
             qcFlaw,
             serialNumber,
             quantity,
+            machineType: selectedMachine, // Pass the machine type separately
           });
 
           // Handle the successful retry response
@@ -412,7 +414,7 @@ function App() {
             console.log("No match found after retry, showing manual reference form");
             setMessage(retryRes.data.message || "SKU not found in spreadsheet.");
             setShowManualRef(true);
-            setPendingSku(selectedMachine || sku);
+            setPendingSku(sku); // Always use the UPC field value
             return;
           }
 
@@ -424,12 +426,12 @@ function App() {
 
           // Add to scanned items
           const newItem = {
-            sku: selectedMachine || sku,
-            description: retryRes.data.row?.Description || retryRes.data.row?.Name || retryRes.data.row?.Style || selectedMachine || sku,
+            sku: sku, // For machines: this is the serial number; for supplies: this is the UPC
+            description: selectedMachine || retryRes.data.row?.Description || retryRes.data.row?.Name || retryRes.data.row?.Style || sku,
             price: retryRes.data.price || 0,
             quantity: quantity,
             qcFlaw: qcFlaw,
-            serialNumber: serialNumber,
+            serialNumber: selectedMachine ? sku : serialNumber, // For machines, the serial is in the UPC field
             size: retryRes.data.row?.Size || "",
             isMachine: !!selectedMachine,
             collection: retryRes.data.spreadsheetMatch,
@@ -814,6 +816,11 @@ function App() {
                       const machine = e.target.value;
                       setSelectedMachine(machine);
                       setSku(""); // clear the input for serial number entry
+                      if (machine) {
+                        setMessage(`${machine} selected! Enter the serial number in the UPC field below.`);
+                      } else {
+                        setMessage("");
+                      }
                     }}
                   >
                     <option value="">-- Select a machine --</option>
@@ -837,6 +844,7 @@ function App() {
                 setQuantity={setQuantity}
                 onManualEntry={handleManualEntry}
                 onNoBarcodeEntry={handleNoBarcodeEntry}
+                selectedMachine={selectedMachine}
               />              {showManualRef && (
                 <ManualRefForm
                   manualRef={manualRef}

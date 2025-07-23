@@ -13,11 +13,12 @@ function SkuForm({
   setQuantity,
   onManualEntry,
   onNoBarcodeEntry,
+  selectedMachine,
 }) {
   return (
     <form onSubmit={handleSkuSubmit} className="mb-6">
       <label className="block mb-2 font-medium text-base-content">
-        UPC:
+        {selectedMachine ? `${selectedMachine} Serial Number:` : "UPC:"}
         <input
           type="text"
           value={sku || ""}
@@ -25,7 +26,7 @@ function SkuForm({
           required
           ref={setSkuInputAndFocus || skuInputRef}
           className="input input-bordered w-full mt-1"
-          placeholder="Scan or enter UPC"
+          placeholder={selectedMachine ? "Enter machine serial number" : "Scan or enter UPC"}
         />
       </label>
       <label className="block mb-2 font-medium text-base-content">

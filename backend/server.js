@@ -233,7 +233,7 @@ app.post("/api/session/restore", async (req, res) => {
 
 // Barcode scan handler
 app.post("/api/barcode", async (req, res) => {
-  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1 } =
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1, machineType } =
     req.body;
   if (!scanType || !barcode || !sessionId) {
     return res
@@ -353,36 +353,39 @@ app.post("/api/barcode", async (req, res) => {
         "Series 9 BiPAP",
         "Series 9 Elite",
       ];
-      const isMachine = machineKeywords.some((keyword) =>
+      
+      // Check if machine type is explicitly provided or if barcode contains machine keywords
+      const isMachine = machineType || machineKeywords.some((keyword) =>
         barcode.toLowerCase().includes(keyword.toLowerCase())
       );
 
       if (isMachine) {
+        // Use machineType if provided, otherwise use barcode (for backwards compatibility)
+        const machineName = machineType || barcode;
+        
         // Get price for the machine
-        const machinePrice = await getPriceForName(barcode, qcFlaw);
+        const machinePrice = await getPriceForName(machineName, qcFlaw);
 
-        // Add to Excel
+        // Add to Excel - use machine name for identification, serial number in the serial field
         appendMachineSpecific({
-          name: barcode,
-          upc: barcode,
-          serialNumber: serialNumber || "",
+          name: machineName,
+          upc: barcode, // This is the serial number when machineType is provided
+          serialNumber: barcode, // The serial number is in the barcode field when using dropdown
           quantity: 1,
           date: new Date(),
         });
 
         // Add to session noteContent and skuEntries
-        const machineNote = `Machine: ${barcode}${
-          serialNumber ? ` Serial Number: ${serialNumber}` : ""
-        }. Price: $${machinePrice}`;
+        const machineNote = `Machine: ${machineName} Serial Number: ${barcode}. Price: $${machinePrice}`;
         if (!currentSession.noteContent) currentSession.noteContent = [];
         currentSession.noteContent.push(machineNote);
 
         if (!currentSession.skuEntries) currentSession.skuEntries = [];
         currentSession.skuEntries.push({
-          description: barcode,
+          description: machineName,
           size: "",
           qcFlaw: qcFlaw,
-          serialNumber: serialNumber || "",
+          serialNumber: barcode, // The serial number is in the barcode field when using dropdown
           price: machinePrice,
           quantity: quantity, // Add quantity to machine entry
           isMachine: true,
@@ -1088,7 +1091,7 @@ app.get("/api/month-end-overstock/export-csv", async (req, res) => {
 // Month End barcode scan handler
 app.post("/api/month-end/barcode", async (req, res) => {
   console.log("🔥 MONTH END BARCODE HANDLER HIT!", req.body);
-  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1 } = req.body;
+  const { scanType, barcode, sessionId, price, serialNumber, qcFlaw, quantity = 1, machineType } = req.body;
   if (!scanType || !barcode || !sessionId) {
     return res.status(400).json({ error: "scanType, barcode, and sessionId are required" });
   }
@@ -1111,38 +1114,41 @@ app.post("/api/month-end/barcode", async (req, res) => {
         "Series 9 BiPAP",
         "Series 9 Elite",
       ];
-      const isMachine = machineKeywords.some((keyword) =>
+      
+      // Check if machine type is explicitly provided or if barcode contains machine keywords
+      const isMachine = machineType || machineKeywords.some((keyword) =>
         barcode.toLowerCase().includes(keyword.toLowerCase())
       );
 
       if (isMachine) {
+        // Use machineType if provided, otherwise use barcode (for backwards compatibility)
+        const machineName = machineType || barcode;
+        
         // Get price for the machine
-        const machinePrice = await getPriceForName(barcode, qcFlaw);
+        const machinePrice = await getPriceForName(machineName, qcFlaw);
 
         // Store machine data in session for month end processing
         if (!currentSession.noteContent) currentSession.noteContent = [];
-        currentSession.noteContent.push(`Machine: ${barcode}${
-          serialNumber ? ` Serial Number: ${serialNumber}` : ""
-        }. Price: $${machinePrice}`);
+        currentSession.noteContent.push(`Machine: ${machineName} Serial Number: ${barcode}. Price: $${machinePrice}`);
 
         if (!currentSession.skuEntries) currentSession.skuEntries = [];
         currentSession.skuEntries.push({
-          description: barcode,
+          description: machineName,
           size: "",
           qcFlaw: qcFlaw,
-          serialNumber: serialNumber || "",
+          serialNumber: barcode, // The serial number is in the barcode field when using dropdown
           price: machinePrice,
           quantity: quantity, // Add quantity field
           isMachine: true,
-          upc: barcode,
-          name: barcode,
+          upc: barcode, // This is the serial number when machineType is provided
+          name: machineName,
         });
 
         // Save machine immediately to Month End Overstock - increment if exists
         await MonthEndOverstock.findOneAndUpdate(
           {
-            UPC: barcode,
-            Style: barcode,
+            UPC: barcode, // Use serial number as UPC
+            Style: machineName, // Use machine name as Style
             Size: "",
             MFR: "Machine"
           },
