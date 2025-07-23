@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { api } from './api/config';
 
 function PriceManagement() {
@@ -7,10 +7,35 @@ function PriceManagement() {
   const [error, setError] = useState('');
   // Load from localStorage or use default values
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('pm_searchTerm') || '');
+  const [inputValue, setInputValue] = useState(() => localStorage.getItem('pm_searchTerm') || '');
   const [filterCollection, setFilterCollection] = useState(() => localStorage.getItem('pm_filterCollection') || 'all');
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Debounce function to prevent excessive search filtering
+  const debounce = useCallback((func, delay) => {
+    let timeoutId;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func(...args), delay);
+    };
+  }, []);
+
+  // Debounced search term setter
+  const debouncedSetSearchTerm = useCallback(
+    debounce((value) => {
+      setSearchTerm(value);
+    }, 300),
+    [debounce]
+  );
+
+  // Handle input change with immediate visual feedback and debounced search
+  const handleSearchChange = useCallback((e) => {
+    const value = e.target.value;
+    setInputValue(value); // Immediate visual update
+    debouncedSetSearchTerm(value); // Debounced search
+  }, [debouncedSetSearchTerm]);
 
   useEffect(() => {
     fetchProducts();
@@ -20,6 +45,11 @@ function PriceManagement() {
   useEffect(() => {
     localStorage.setItem('pm_searchTerm', searchTerm);
   }, [searchTerm]);
+
+  // Save input value to localStorage for immediate persistence
+  useEffect(() => {
+    localStorage.setItem('pm_searchTerm', inputValue);
+  }, [inputValue]);
 
   // Save filter collection to localStorage whenever it changes
   useEffect(() => {
@@ -76,10 +106,21 @@ function PriceManagement() {
         throw new Error('Failed to update product');
       }
 
-      // Update the product in the local state
+      // Update the product in the local state with proper field mapping
       setProducts(prev => prev.map(p => 
         p._id === editingField.productId 
-          ? { ...p, ...response.data.product }
+          ? {
+              ...p,
+              // Map the backend field names to frontend expected names
+              RefNum: response.data.product.RefNum,
+              UPC: response.data.product.UPC,
+              MFR: response.data.product.MFR,
+              Style: response.data.product.Style,
+              Size: response.data.product.Size,
+              Price: response.data.product.Price,
+              // Keep the collection field from original product
+              collection: p.collection
+            }
           : p
       ));
 
@@ -105,17 +146,22 @@ function PriceManagement() {
     }
   };
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = !searchTerm || 
-      (product.Style && product.Style.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (product.RefNum && product.RefNum.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (product.MFR && product.MFR.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (product.UPC && product.UPC.includes(searchTerm));
+  const filteredProducts = useMemo(() => {
+    return products.filter(product => {
+      if (!product) return false;
+      
+      const searchLower = searchTerm.toLowerCase().trim();
+      const matchesSearch = !searchTerm || 
+        (product.Style && String(product.Style).toLowerCase().includes(searchLower)) ||
+        (product.RefNum && String(product.RefNum).toLowerCase().includes(searchLower)) ||
+        (product.MFR && String(product.MFR).toLowerCase().includes(searchLower)) ||
+        (product.UPC && String(product.UPC).toLowerCase().includes(searchLower));
 
-    const matchesFilter = filterCollection === 'all' || product.collection === filterCollection;
+      const matchesFilter = filterCollection === 'all' || product.collection === filterCollection;
 
-    return matchesSearch && matchesFilter;
-  });
+      return matchesSearch && matchesFilter;
+    });
+  }, [products, searchTerm, filterCollection]);
 
   const renderEditableField = (product, field, value, isNumber = false) => {
     const isEditing = editingField && editingField.productId === product._id && editingField.field === field;
@@ -208,7 +254,7 @@ function PriceManagement() {
         )}
 
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg dark:shadow-gray-900/20 mb-6 p-4 border dark:border-gray-700">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label htmlFor="search" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Search
@@ -217,8 +263,8 @@ function PriceManagement() {
                 id="search"
                 type="text"
                 placeholder="Search by name, ref num, manufacturer, or UPC..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                value={inputValue}
+                onChange={handleSearchChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
               />
             </div>
@@ -238,6 +284,15 @@ function PriceManagement() {
                 <option value="MonthEndInventory">Month End Inventory</option>
                 <option value="MonthEndOverstock">Month End Overstock</option>
               </select>
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={fetchProducts}
+                disabled={loading}
+                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-md transition-colors"
+              >
+                {loading ? 'Refreshing...' : 'Refresh Data'}
+              </button>
             </div>
           </div>
         </div>

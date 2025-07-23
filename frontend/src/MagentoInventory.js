@@ -222,7 +222,7 @@ function MagentoInventory() {
     e.preventDefault();
     setMessage("Checking manual reference...");
     try {
-      const res = await axios.post(`${apiUrl}/api/magento-inventory/manual`, {
+      const res = await axios.post(`${apiUrl}/api/magento-inventory/barcode/manual`, {
         barcode: pendingSku,
         manualRef,
         sessionId,
@@ -232,7 +232,7 @@ function MagentoInventory() {
       });
 
       if (res.data.match) {
-        setMessage(res.data.message || "Success!");
+        setMessage(res.data.message || `Product found for reference ${manualRef}!`);
         setPrice(res.data.price);
         setTotalPrice((prev) => prev + (res.data.price * quantity));
         setSpreadsheetMatch(res.data.spreadsheetMatch);
@@ -407,7 +407,7 @@ function MagentoInventory() {
     }
   };
 
-  const fieldOrder = ["ID", "Name", "RefNum", "Price", "Quantity", "Websites", "Manufacturer", "size"];
+  const fieldOrder = ["ID", "Name", "RefNum", "UPC", "Price", "Quantity", "Websites", "Manufacturer", "size"];
 
   // Function to clear magento workflow state from localStorage
   const clearMagentoWorkflowState = () => {
@@ -599,8 +599,11 @@ function MagentoInventory() {
               <div className="max-h-32 overflow-y-auto">
                 {scannedItems.map((item, index) => (
                   <div key={index} className="text-sm mb-1">
-                    {item.description} - ${item.price?.toFixed(2) || "0.00"}
-                    {item.quantity && item.quantity > 1 ? ` (Total: $${(item.price * item.quantity).toFixed(2)})` : ""}
+                    <div className="font-medium">{item.description}</div>
+                    <div className="text-xs opacity-70">
+                      UPC: {item.sku || "N/A"} | Price: ${item.price?.toFixed(2) || "0.00"}
+                      {item.quantity && item.quantity > 1 ? ` | Qty: ${item.quantity} | Total: $${(item.price * item.quantity).toFixed(2)}` : ""}
+                    </div>
                   </div>
                 ))}
               </div>

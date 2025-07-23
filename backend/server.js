@@ -1353,6 +1353,40 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       }
     );
 
+    // Two-way integration: Also update the regular inventory collection with UPC if barcode exists
+    if (barcode && matchResult.row) {
+      try {
+        const regularCollection = matchResult.collection === "Inventory" ? Inventory : Overstock;
+        await regularCollection.findOneAndUpdate(
+          {
+            RefNum: matchResult.row.RefNum || manualRef
+          },
+          {
+            $set: { 
+              UPC: barcode,
+              Date: new Date()
+            }
+          },
+          {
+            new: true
+          }
+        );
+        
+        // Also call writeUPCToMongoDB for additional Pipedrive integration
+        await writeUPCToMongoDB({
+          collection: matchResult.collection,
+          matchedColumn: matchResult.matchedColumn,
+          rowValue: matchResult.row[matchResult.matchedColumn],
+          upc: barcode,
+        });
+        
+        console.log(`✅ Two-way integration: Updated UPC ${barcode} in regular ${matchResult.collection} collection for RefNum: ${matchResult.row.RefNum || manualRef}`);
+      } catch (error) {
+        console.error("Error updating regular inventory collection with UPC:", error);
+        // Don't fail the request if this update fails - log and continue
+      }
+    }
+
     await setSession(sessionId, currentSession);
 
     let descriptionResult;
@@ -1439,6 +1473,43 @@ app.post("/api/month-end/product/new", async (req, res) => {
         setDefaultsOnInsert: true
       }
     );
+
+    // Two-way integration: Also add/update the product in regular inventory collection
+    if (barcode || manualRef) {
+      try {
+        const regularCollection = isInventoryItem ? Inventory : Overstock;
+        await regularCollection.findOneAndUpdate(
+          {
+            // Match by RefNum if available, otherwise by UPC, otherwise by description
+            ...(manualRef ? 
+              { RefNum: manualRef } :
+              barcode ? { UPC: barcode } :
+              { Style: description, Size: size || "", MFR: mfr }
+            )
+          },
+          {
+            $set: { 
+              RefNum: manualRef || "",
+              Style: description,
+              Size: size || "",
+              MFR: mfr || "",
+              ...(barcode ? { UPC: barcode } : {}),
+              Date: new Date(),
+              Price: calculatedPrice
+            }
+          },
+          {
+            upsert: true,
+            new: true
+          }
+        );
+        
+        console.log(`✅ Two-way integration: Added/updated product in regular ${isInventoryItem ? 'Inventory' : 'Overstock'} collection - RefNum: ${manualRef || 'N/A'}, UPC: ${barcode || 'N/A'}`);
+      } catch (error) {
+        console.error("Error updating regular inventory collection with new product:", error);
+        // Don't fail the request if this update fails - log and continue
+      }
+    }
 
     const currentSession = await getSession(sessionId);
     
@@ -1730,8 +1801,8 @@ app.post("/api/magento-inventory/barcode", async (req, res) => {
       });
     }
 
-    // Call getPriceFromDatabase to find the product
-    const matchResult = await getPriceFromDatabase(barcode, scanType);
+    // Call matchSkuWithDatabase to find the product
+    const matchResult = await matchSkuWithDatabase(barcode);
     
     if (!matchResult || !matchResult.match) {
       console.log(`[Magento Inventory] No match found for barcode: ${barcode}`);
@@ -1744,15 +1815,20 @@ app.post("/api/magento-inventory/barcode", async (req, res) => {
       });
     }
 
+    // Calculate price properly
+    const name = matchResult.row.Name || matchResult.row.Description || matchResult.row.Style || "";
+    let calculatedPrice = 0;
+    calculatedPrice = await getPriceFromDatabase(matchResult.row, name, qcFlaw);
+
     // Product found, save to MagentoInventory collection
     const magentoInventoryItem = new MagentoInventory({
-      RefNum: matchResult.refNum,
-      UPC: matchResult.barcode || barcode,
-      MFR: matchResult.mfr || "",
-      Style: matchResult.style || "",
-      Size: matchResult.size || "",
+      RefNum: matchResult.row[matchResult.matchedColumn] || "",
+      UPC: barcode,
+      MFR: matchResult.row.MFR || matchResult.collection || "",
+      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      Size: matchResult.row.Size || "",
       Quantity: quantity || 1,
-      Price: matchResult.price || 0,
+      Price: calculatedPrice,
       Date: new Date(),
       QcFlaw: qcFlaw || "none",
       SerialNumber: serialNumber || "",
@@ -1765,9 +1841,9 @@ app.post("/api/magento-inventory/barcode", async (req, res) => {
     res.json({
       match: true,
       message: `Product added to Magento inventory successfully!`,
-      spreadsheetMatch: matchResult,
-      descriptionResult: matchResult.style || matchResult.description || "",
-      price: matchResult.price || 0
+      spreadsheetMatch: matchResult.collection,
+      descriptionResult: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      price: calculatedPrice
     });
 
   } catch (err) {
@@ -1787,8 +1863,8 @@ app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
       return res.status(400).json({ error: "Manual reference number is required" });
     }
 
-    // Try to find product by manual reference
-    const matchResult = await getPriceFromDatabase(manualRef, "manual");
+    // Try to find product by manual reference using the correct function
+    const matchResult = await matchSkuWithDatabaseManual(pendingSku, manualRef);
     
     if (!matchResult || !matchResult.match) {
       console.log(`[Magento Inventory] No match found for manual ref: ${manualRef}`);
@@ -1801,15 +1877,20 @@ app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
       });
     }
 
-    // Product found, save to MagentoInventory collection
+    // Product found, calculate price properly
+    let nameForPricing = (matchResult.row && (matchResult.row.Name || matchResult.row.Description || matchResult.row.Style)) || "";
+    let calculatedPrice = 0;
+    calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
+
+    // Save to MagentoInventory collection
     const magentoInventoryItem = new MagentoInventory({
-      RefNum: matchResult.refNum,
+      RefNum: matchResult.row[matchResult.matchedColumn] || manualRef,
       UPC: pendingSku || "", // Use the original scanned barcode if available
-      MFR: matchResult.mfr || "",
-      Style: matchResult.style || "",
-      Size: matchResult.size || "",
+      MFR: matchResult.row.MFR || matchResult.collection || "",
+      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      Size: matchResult.row.Size || "",
       Quantity: quantity || 1,
-      Price: matchResult.price || 0,
+      Price: calculatedPrice,
       Date: new Date(),
       QcFlaw: qcFlaw || "none",
       SerialNumber: serialNumber || "",
@@ -1822,9 +1903,9 @@ app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
     res.json({
       match: true,
       message: `Product added to Magento inventory via manual reference!`,
-      spreadsheetMatch: matchResult,
-      descriptionResult: matchResult.style || matchResult.description || "",
-      price: matchResult.price || 0
+      spreadsheetMatch: matchResult.collection,
+      descriptionResult: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      price: calculatedPrice
     });
 
   } catch (err) {
