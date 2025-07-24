@@ -39,12 +39,10 @@ function MagentoInventory() {
   const [newProduct, setNewProduct] = useState(() => {
     const saved = localStorage.getItem('magento_newProduct');
     return saved && saved !== 'undefined' ? JSON.parse(saved) : {
-      id: "",
       name: "",
       refNum: "",
       price: "",
       quantity: "",
-      websites: "Main Website",
       manufacturer: "",
       size: "",
     };
@@ -146,25 +144,41 @@ function MagentoInventory() {
   }, [quantity]);
 
   // Function to refresh magento inventory data
-  const refreshMagentoData = () => {
-    axios
-      .get(`${apiUrl}/api/magento-inventory`)
-      .then((res) => {
-        console.log("Refreshed Magento Inventory Data:", res.data.data);
-        setMagentoInventoryData(res.data.data);
-      })
-      .catch(() => setMagentoInventoryData([]));
+  const refreshMagentoData = async () => {
+    try {
+      console.log("Refreshing Magento Inventory data...");
+      // Add cache-busting parameter to ensure fresh data
+      const timestamp = new Date().getTime();
+      const res = await axios.get(`${apiUrl}/api/magento-inventory?t=${timestamp}`);
+      console.log("Refreshed Magento Inventory Data:", res.data.data);
+      console.log("Number of records received:", res.data.data ? res.data.data.length : 0);
+      setMagentoInventoryData(res.data.data || []);
+      setMessage(`Data refreshed successfully. Found ${res.data.data ? res.data.data.length : 0} records.`);
+    } catch (error) {
+      console.error("Error refreshing Magento Inventory data:", error);
+      setMagentoInventoryData([]);
+      setMessage("Error refreshing data: " + error.message);
+    }
   };
 
-  // Fetch Magento Inventory data
+  // Auto-refresh data when component becomes visible
   useEffect(() => {
-    axios
-      .get(`${apiUrl}/api/magento-inventory`)
-      .then((res) => {
-        console.log("Magento Inventory Data:", res.data.data);
-        setMagentoInventoryData(res.data.data);
-      })
-      .catch(() => setMagentoInventoryData([]));
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log("Page became visible, refreshing Magento Inventory data...");
+        refreshMagentoData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Fetch Magento Inventory data on component mount
+  useEffect(() => {
+    refreshMagentoData();
   }, []);
 
   const handleSkuSubmit = async (e) => {
@@ -173,7 +187,6 @@ function MagentoInventory() {
 
     try {
       const res = await axios.post(`${apiUrl}/api/magento-inventory/barcode`, {
-        scanType: "sku",
         barcode: sku,
         sessionId,
         qcFlaw,
@@ -263,12 +276,10 @@ function MagentoInventory() {
         setMessage(res.data.message || "Manual reference not found.");
         setShowNewProductForm(true);
         setNewProduct({
-          id: "",
           name: "",
           refNum: manualRef,
           price: "",
-          quantity: "",
-          websites: "Main Website",
+          quantity: quantity || 1,
           manufacturer: "",
           size: "",
         });
@@ -282,15 +293,18 @@ function MagentoInventory() {
     e.preventDefault();
     setMessage("Adding new Magento product...");
     try {
-      const res = await axios.post(`${apiUrl}/api/magento-inventory/product/new`, {
-        id: newProduct.id,
-        name: newProduct.name,
-        refNum: newProduct.refNum,
-        price: newProduct.price,
-        quantity: newProduct.quantity || quantity,
-        websites: newProduct.websites,
-        manufacturer: newProduct.manufacturer,
-        size: newProduct.size,
+      const res = await axios.post(`${apiUrl}/api/magento-inventory/new-product`, {
+        product: {
+          refNum: newProduct.refNum,
+          barcode: pendingSku, // Use the original scanned barcode
+          name: newProduct.name,
+          price: newProduct.price,
+          quantity: newProduct.quantity || quantity,
+          manufacturer: newProduct.manufacturer,
+          size: newProduct.size,
+          qcFlaw: qcFlaw,
+          serialNumber: serialNumber
+        },
         sessionId,
       });
 
@@ -316,12 +330,10 @@ function MagentoInventory() {
       setQcFlaw("none");
       setSerialNumber("");
       setNewProduct({
-        id: "",
         name: "",
         refNum: "",
         price: "",
         quantity: "",
-        websites: "Main Website",
         manufacturer: "",
         size: "",
       });
@@ -436,6 +448,47 @@ function MagentoInventory() {
     });
   };
 
+  // Undo last scan function
+  const handleUndoLastScan = async () => {
+    try {
+      const res = await axios.post(`${apiUrl}/api/magento-inventory/undo`, {
+        sessionId,
+      });
+
+      setMessage(res.data.message || "Last scan undone successfully");
+      
+      // Update the local state based on the undo response
+      if (res.data.undoneItem && scannedItems.length > 0) {
+        // Remove the last item from local scanned items
+        setScannedItems((prev) => prev.slice(0, -1));
+        
+        // Update total price
+        if (res.data.newTotalPrice !== undefined) {
+          setTotalPrice(res.data.newTotalPrice);
+        } else if (res.data.undoneItem.price) {
+          setTotalPrice((prev) => Math.max(0, prev - (res.data.undoneItem.price * (res.data.undoneItem.quantity || 1))));
+        }
+      }
+
+      // Clear pending states if undo cleared them
+      if (res.data.action === "clearPendingState") {
+        setShowManualRef(false);
+        setShowNewProductForm(false);
+        setPendingSku("");
+        setManualRef("");
+        setSku("");
+      }
+
+      // Refresh the magento data to show updated inventory
+      refreshMagentoData();
+      
+      console.log(`[Magento Inventory] Undo completed:`, res.data);
+    } catch (error) {
+      setMessage(`Undo failed: ${error.response?.data?.error || error.message}`);
+      console.error("Error undoing last scan:", error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-base-200 flex">
       <div className="w-1/3 bg-base-100 shadow-xl p-6">
@@ -484,16 +537,6 @@ function MagentoInventory() {
             <form onSubmit={handleNewProductSubmit} className="mb-6">
               <h3 className="text-lg font-bold mb-4">Add New Magento Product</h3>
               <input
-                type="number"
-                placeholder="ID"
-                className="input input-bordered w-full mb-2"
-                value={newProduct.id}
-                onChange={(e) =>
-                  setNewProduct({ ...newProduct, id: e.target.value })
-                }
-                required
-              />
-              <input
                 type="text"
                 placeholder="Name"
                 className="input input-bordered w-full mb-2"
@@ -530,15 +573,6 @@ function MagentoInventory() {
                 value={newProduct.quantity}
                 onChange={(e) =>
                   setNewProduct({ ...newProduct, quantity: e.target.value })
-                }
-              />
-              <input
-                type="text"
-                placeholder="Websites"
-                className="input input-bordered w-full mb-2"
-                value={newProduct.websites}
-                onChange={(e) =>
-                  setNewProduct({ ...newProduct, websites: e.target.value })
                 }
               />
               <input
@@ -610,12 +644,21 @@ function MagentoInventory() {
               <div className="font-bold mt-2">
                 Total: ${scannedItems.reduce((sum, item) => sum + (item.price * (item.quantity || 1)), 0).toFixed(2)}
               </div>
-              <button
-                onClick={handleFinishMagento}
-                className="btn btn-success w-full mt-2"
-              >
-                Finish Magento Inventory
-              </button>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={handleUndoLastScan}
+                  className="btn btn-warning flex-1"
+                  disabled={scannedItems.length === 0}
+                >
+                  ↶ Undo Last Scan
+                </button>
+                <button
+                  onClick={handleFinishMagento}
+                  className="btn btn-success flex-1"
+                >
+                  Finish Magento Inventory
+                </button>
+              </div>
             </div>
           )}
 
@@ -631,13 +674,19 @@ function MagentoInventory() {
         <div className="card bg-base-100 shadow-xl">
           <div className="card-body">
             <h2 className="card-title text-2xl mb-4">Magento Inventory Data</h2>
-            <div className="mb-4">
+            <div className="mb-4 flex gap-2">
               <button
                 onClick={handleExportCSV}
                 className="btn btn-outline btn-primary"
                 disabled={magentoInventoryData.length === 0}
               >
                 📊 Export CSV
+              </button>
+              <button
+                onClick={refreshMagentoData}
+                className="btn btn-outline btn-secondary"
+              >
+                🔄 Refresh Data
               </button>
             </div>
             <div className="overflow-x-auto">

@@ -42,7 +42,7 @@ function PriceManagement() {
   };
 
   const handleEditField = (product, field, currentValue) => {
-    // Use composite key: collection-id to handle duplicates between regular and month-end collections
+      // Use composite key: collection-id to handle duplicates between regular and month-end collections
     setEditingField({ productId: `${product.collection}-${product._id}`, field, originalId: product._id, collection: product.collection });
     setEditValue(currentValue || '');
   };

@@ -7,6 +7,7 @@ import { dirname } from "path";
 import Inventory from "./models/Inventory.js";
 import Overstock from "./models/Overstock.js";
 import MachineSpecific from "./models/MachineSpecific.js";
+import MagentoInventory from "./models/MagentoInventory.js";
 
 const UPC_API_KEY = process.env.UPC_API_KEY; // Set this in your .env
 
@@ -309,4 +310,51 @@ export async function incrementSupplyQuantity({
     { upsert: true, new: true }
   );
   return result;
+}
+
+export async function matchSkuWithMagentoInventory(barcode) {
+  // Only check MagentoInventory collection
+  const magentoMatch = await MagentoInventory.findOne({ UPC: barcode });
+  if (magentoMatch) {
+    console.log("Found exact match in MagentoInventory collection");
+    return {
+      match: true,
+      collection: "MagentoInventory",
+      row: magentoMatch,
+      matchedColumn: "UPC",
+      score: 1,
+      brand: magentoMatch.MFR || null,
+      model: magentoMatch.Style || null,
+      foundInMongoDB: true,
+    };
+  }
+
+  // If not found in MagentoInventory, return no match
+  console.log("No match found in MagentoInventory collection for barcode:", barcode);
+  return { 
+    match: false, 
+    reason: "no_match_in_magento_inventory",
+    message: "Barcode not found in MagentoInventory database"
+  };
+}
+
+export async function matchSkuWithMagentoInventoryManual(barcode, manualRef) {
+  // Only check MagentoInventory collection by RefNum
+  const magentoMatch = await MagentoInventory.findOne({ "RefNum": manualRef });
+  if (magentoMatch) {
+    return {
+      match: true,
+      collection: "MagentoInventory",
+      row: magentoMatch,
+      matchedColumn: "RefNum",
+      score: 1,
+      manualRef,
+    };
+  }
+
+  return {
+    match: false,
+    reason: "No match found in MagentoInventory collection with manual reference",
+    manualRef,
+  };
 }

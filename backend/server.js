@@ -10,6 +10,8 @@ import { addNoteToPipedrive } from "./pipedrive.js";
 import {
   matchSkuWithDatabase,
   matchSkuWithDatabaseManual,
+  matchSkuWithMagentoInventory,
+  matchSkuWithMagentoInventoryManual,
   writeUPCToMongoDB,
   returnProductDescription,
   getPriceForName,
@@ -1273,7 +1275,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
           upc: barcode,
         });
       } catch (error) {
-        console.error("Error writing to spreadsheet:", error);
+        console.error("Error writing to spreadsheet or adding note:", error);
       }
 
       return res.json({
@@ -1312,21 +1314,38 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
     let calculatedPrice = 0;
     calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
+    const noteContent = `${barcode ? `SKU scanned: ${barcode}` : "No barcode available"}. Spreadsheet match: ${
+      matchResult.file
+    } - ${
+      matchResult.row[matchResult.matchedColumn]
+    }. Price: $${calculatedPrice}. Description: ${
+      matchResult.row.Description ||
+      matchResult.row.Name ||
+      matchResult.row.Style ||
+      ""
+    }${matchResult.row.Size ? " Size: " + matchResult.row.Size : ""}${
+      qcFlaw && qcFlaw !== "none" ? ` [Flaw: ${qcFlawLabel(qcFlaw)}]` : ""
+    }${serialNumber ? ` Serial Number: ${serialNumber}` : ""}`;
+
     if (!currentSession.noteContent) currentSession.noteContent = [];
-    currentSession.noteContent.push(`${barcode ? `SKU scanned: ${barcode}` : "No barcode available"}. Spreadsheet match: ${matchResult.file} - ${matchResult.row[matchResult.matchedColumn]}. Price: $${calculatedPrice}`);
+    currentSession.noteContent.push(noteContent);
 
     if (!currentSession.prices) currentSession.prices = [];
     currentSession.prices.push(calculatedPrice);
 
+    // Optionally add to skuEntries as well
     if (!currentSession.skuEntries) currentSession.skuEntries = [];
     currentSession.skuEntries.push({
-      description: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      description:
+        matchResult.row.Description ||
+        matchResult.row.Name ||
+        matchResult.row.Style ||
+        "",
       size: matchResult.row.Size || "",
       qcFlaw: qcFlaw,
       serialNumber: serialNumber || "",
       price: calculatedPrice,
       quantity: quantity, // Add quantity to manual reference entry
-      upc: barcode || "", // Use empty string if no barcode
     });
 
     // Save immediately to Month End collection based on original collection - increment if exists (RefNum as primary key)
@@ -1785,65 +1804,87 @@ app.listen(PORT, () => {
 // Magento Inventory barcode scanning endpoint
 app.post("/api/magento-inventory/barcode", async (req, res) => {
   try {
-    const { scanType, barcode, qcFlaw, serialNumber, quantity, sessionId } = req.body;
+    const { barcode, qcFlaw, serialNumber, quantity, sessionId } = req.body;
     
-    console.log(`[Magento Inventory] Barcode scan received:`, { scanType, barcode, qcFlaw, serialNumber, quantity, sessionId });
+    console.log(`[Magento Inventory] Barcode scan received:`, { barcode, qcFlaw, serialNumber, quantity, sessionId });
 
     // Handle null or empty barcode
     if (!barcode || barcode.trim() === '') {
       console.log(`[Magento Inventory] Empty barcode received, returning no match`);
       return res.json({
         match: false,
-        message: "No barcode provided. Please use manual entry.",
-        spreadsheetMatch: null,
-        descriptionResult: "",
-        price: null
+        message: "No barcode provided. Please use manual entry."
       });
     }
 
-    // Call matchSkuWithDatabase to find the product
-    const matchResult = await matchSkuWithDatabase(barcode);
+    // Try to match the barcode with MagentoInventory database only
+    const matchResult = await matchSkuWithMagentoInventory(barcode);
     
+    // If no match found, return match: false to trigger manual reference workflow
     if (!matchResult || !matchResult.match) {
       console.log(`[Magento Inventory] No match found for barcode: ${barcode}`);
       return res.json({
         match: false,
-        message: `No product found for ${scanType.toUpperCase()}: ${barcode}`,
-        spreadsheetMatch: null,
-        descriptionResult: "",
-        price: null
+        message: `UPC ${barcode} not found in MagentoInventory database. Please enter manual reference.`
       });
     }
 
-    // Calculate price properly
-    const name = matchResult.row.Name || matchResult.row.Description || matchResult.row.Style || "";
+    // Product found, calculate price and update existing document
+    const name = matchResult.row.Style || "";
     let calculatedPrice = 0;
     calculatedPrice = await getPriceFromDatabase(matchResult.row, name, qcFlaw);
 
-    // Product found, save to MagentoInventory collection
-    const magentoInventoryItem = new MagentoInventory({
-      RefNum: matchResult.row[matchResult.matchedColumn] || "",
-      UPC: barcode,
-      MFR: matchResult.row.MFR || matchResult.collection || "",
-      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      Size: matchResult.row.Size || "",
-      Quantity: quantity || 1,
-      Price: calculatedPrice,
-      Date: new Date(),
-      QcFlaw: qcFlaw || "none",
-      SerialNumber: serialNumber || "",
-      Source: `Magento Inventory - ${sessionId}`
+    // Update the existing MagentoInventory document instead of creating a new one
+    const magentoInventoryItem = await MagentoInventory.findOneAndUpdate(
+      { UPC: barcode }, // Find by UPC since this was a barcode match
+      {
+        $set: {
+          Quantity: (matchResult.row.Quantity || 0) + (quantity || 1), // Add to existing quantity
+          Price: calculatedPrice,
+          Date: new Date(),
+          QcFlaw: qcFlaw || "none",
+          SerialNumber: serialNumber || "",
+          Source: `Magento Inventory Scan - ${sessionId}`
+        }
+      },
+      { 
+        new: true, // Return the updated document
+        upsert: false // Don't create if not found (we already verified it exists)
+      }
+    );
+
+    console.log(`[Magento Inventory] Barcode scan updated existing document:`, magentoInventoryItem);
+
+    // Add to session for undo functionality
+    const currentSession = await getSession(sessionId);
+    if (!currentSession.scannedItems) currentSession.scannedItems = [];
+    if (!currentSession.totalPrice) currentSession.totalPrice = 0;
+
+    currentSession.scannedItems.push({
+      upc: barcode,
+      refNum: matchResult.row.RefNum || "",
+      description: matchResult.row.Style || "",
+      size: matchResult.row.Size || "",
+      price: calculatedPrice,
+      quantity: quantity || 1,
+      qcFlaw: qcFlaw || "none",
+      serialNumber: serialNumber || "",
+      timestamp: new Date(),
+      source: "barcode_scan"
     });
 
-    await magentoInventoryItem.save();
-    console.log(`[Magento Inventory] Item saved:`, magentoInventoryItem);
+    currentSession.totalPrice += calculatedPrice * (quantity || 1);
+    await setSession(sessionId, currentSession);
 
     res.json({
       match: true,
-      message: `Product added to Magento inventory successfully!`,
+      message: `Product found and added to Magento inventory!`,
       spreadsheetMatch: matchResult.collection,
-      descriptionResult: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      price: calculatedPrice
+      descriptionResult: { description: matchResult.row.Style || "" },
+      price: calculatedPrice,
+      row: matchResult.row,
+      totalPrice: currentSession.totalPrice,
+      scannedItemsCount: currentSession.scannedItems.length
     });
 
   } catch (err) {
@@ -1855,57 +1896,81 @@ app.post("/api/magento-inventory/barcode", async (req, res) => {
 // Magento Inventory manual entry endpoint
 app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
   try {
-    const { manualRef, pendingSku, qcFlaw, serialNumber, quantity, sessionId } = req.body;
+    const { manualRef, barcode, qcFlaw, serialNumber, quantity, sessionId } = req.body;
     
-    console.log(`[Magento Inventory] Manual entry received:`, { manualRef, pendingSku, qcFlaw, serialNumber, quantity, sessionId });
+    console.log(`[Magento Inventory] Manual entry received:`, { manualRef, barcode, qcFlaw, serialNumber, quantity, sessionId });
 
     if (!manualRef || manualRef.trim() === '') {
       return res.status(400).json({ error: "Manual reference number is required" });
     }
 
-    // Try to find product by manual reference using the correct function
-    const matchResult = await matchSkuWithDatabaseManual(pendingSku, manualRef);
+    // Try to find product by manual reference in MagentoInventory database only
+    const matchResult = await matchSkuWithMagentoInventoryManual(barcode, manualRef);
     
     if (!matchResult || !matchResult.match) {
       console.log(`[Magento Inventory] No match found for manual ref: ${manualRef}`);
       return res.json({
         match: false,
-        message: `No product found for reference: ${manualRef}`,
-        spreadsheetMatch: null,
-        descriptionResult: "",
-        price: null
+        message: `No product found for reference: ${manualRef} in MagentoInventory database`
       });
     }
 
-    // Product found, calculate price properly
+    // Product found, calculate price
     let nameForPricing = (matchResult.row && (matchResult.row.Name || matchResult.row.Description || matchResult.row.Style)) || "";
     let calculatedPrice = 0;
     calculatedPrice = await getPriceFromDatabase(matchResult.row, nameForPricing, qcFlaw);
 
-    // Save to MagentoInventory collection
-    const magentoInventoryItem = new MagentoInventory({
-      RefNum: matchResult.row[matchResult.matchedColumn] || manualRef,
-      UPC: pendingSku || "", // Use the original scanned barcode if available
-      MFR: matchResult.row.MFR || matchResult.collection || "",
-      Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      Size: matchResult.row.Size || "",
-      Quantity: quantity || 1,
-      Price: calculatedPrice,
-      Date: new Date(),
-      QcFlaw: qcFlaw || "none",
-      SerialNumber: serialNumber || "",
-      Source: `Magento Inventory Manual - ${sessionId}`
+    // Update the existing MagentoInventory document instead of creating a new one
+    const magentoInventoryItem = await MagentoInventory.findOneAndUpdate(
+      { RefNum: manualRef }, // Find by the manual reference number
+      {
+        $set: {
+          UPC: barcode || "", // Update UPC with the scanned barcode
+          Quantity: (matchResult.row.Quantity || 0) + (quantity || 1), // Add to existing quantity
+          Price: calculatedPrice,
+          Date: new Date(),
+          QcFlaw: qcFlaw || "none",
+          SerialNumber: serialNumber || "",
+          Source: `Magento Inventory Manual - ${sessionId}`
+        }
+      },
+      { 
+        new: true, // Return the updated document
+        upsert: false // Don't create if not found (we already verified it exists)
+      }
+    );
+
+    console.log(`[Magento Inventory] Manual entry updated existing document:`, magentoInventoryItem);
+
+    // Add to session for undo functionality
+    const currentSession = await getSession(sessionId);
+    if (!currentSession.scannedItems) currentSession.scannedItems = [];
+    if (!currentSession.totalPrice) currentSession.totalPrice = 0;
+
+    currentSession.scannedItems.push({
+      upc: barcode || "",
+      refNum: manualRef,
+      description: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
+      size: matchResult.row.Size || "",
+      price: calculatedPrice,
+      quantity: quantity || 1,
+      qcFlaw: qcFlaw || "none",
+      serialNumber: serialNumber || "",
+      timestamp: new Date(),
+      source: "manual_entry"
     });
 
-    await magentoInventoryItem.save();
-    console.log(`[Magento Inventory] Manual entry saved:`, magentoInventoryItem);
+    currentSession.totalPrice += calculatedPrice * (quantity || 1);
+    await setSession(sessionId, currentSession);
 
     res.json({
       match: true,
       message: `Product added to Magento inventory via manual reference!`,
       spreadsheetMatch: matchResult.collection,
-      descriptionResult: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      price: calculatedPrice
+      descriptionResult: { description: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "" },
+      price: calculatedPrice,
+      totalPrice: currentSession.totalPrice,
+      scannedItemsCount: currentSession.scannedItems.length
     });
 
   } catch (err) {
@@ -1943,10 +2008,36 @@ app.post("/api/magento-inventory/new-product", async (req, res) => {
     await magentoInventoryItem.save();
     console.log(`[Magento Inventory] New product saved:`, magentoInventoryItem);
 
+    // Add to session for undo functionality
+    const currentSession = await getSession(sessionId);
+    if (!currentSession.scannedItems) currentSession.scannedItems = [];
+    if (!currentSession.totalPrice) currentSession.totalPrice = 0;
+
+    const calculatedPrice = parseFloat(product.price) || 0;
+    const quantity = parseInt(product.quantity) || 1;
+
+    currentSession.scannedItems.push({
+      upc: product.barcode || "",
+      refNum: product.refNum,
+      description: product.name || "",
+      size: product.size || "",
+      price: calculatedPrice,
+      quantity: quantity,
+      qcFlaw: product.qcFlaw || "none",
+      serialNumber: product.serialNumber || "",
+      timestamp: new Date(),
+      source: "new_product"
+    });
+
+    currentSession.totalPrice += calculatedPrice * quantity;
+    await setSession(sessionId, currentSession);
+
     res.json({
       success: true,
       message: `New product added to Magento inventory successfully!`,
-      product: magentoInventoryItem
+      product: magentoInventoryItem,
+      totalPrice: currentSession.totalPrice,
+      scannedItemsCount: currentSession.scannedItems.length
     });
 
   } catch (err) {
@@ -1962,8 +2053,15 @@ app.post("/api/magento-inventory/finish", async (req, res) => {
     
     console.log(`[Magento Inventory] Finish session received:`, { sessionId });
 
-    // Optional: You could add any cleanup logic here if needed
-    // For now, just return a success message
+    // Clear the session data
+    const currentSession = await getSession(sessionId);
+    if (currentSession) {
+      await setSession(sessionId, {
+        scannedItems: [],
+        totalPrice: 0
+      });
+      console.log(`[Magento Inventory] Session ${sessionId} cleared`);
+    }
     
     res.json({
       success: true,
@@ -1973,5 +2071,115 @@ app.post("/api/magento-inventory/finish", async (req, res) => {
   } catch (err) {
     console.error(`[Magento Inventory] Error in finish endpoint:`, err);
     res.status(500).json({ error: "Failed to complete Magento inventory session" });
+  }
+});
+
+// Magento Inventory undo last scan endpoint
+app.post("/api/magento-inventory/undo", async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    
+    console.log(`[Magento Inventory] Undo request received:`, { sessionId });
+
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    // Get current session state
+    const currentSession = await getSession(sessionId);
+    
+    if (!currentSession) {
+      return res.status(400).json({ error: "No session found" });
+    }
+
+    // Check for pending states first (manual reference, new product forms)
+    if (currentSession.pendingState) {
+      const pendingState = currentSession.pendingState;
+      
+      // Clear the pending state
+      delete currentSession.pendingState;
+      await setSession(sessionId, currentSession);
+      
+      console.log(`[Magento Inventory] Cleared pending state:`, pendingState.type);
+      return res.json({
+        message: "Cancelled pending operation",
+        action: "clearPendingState",
+        pendingType: pendingState.type,
+        clearedSku: pendingState.sku || null,
+        remainingItems: currentSession.scannedItems ? currentSession.scannedItems.length : 0
+      });
+    }
+
+    // Check if there are any scanned items to undo
+    if (!currentSession.scannedItems || currentSession.scannedItems.length === 0) {
+      return res.status(400).json({ error: "No items to undo" });
+    }
+
+    // Get the last scanned item
+    const lastItem = currentSession.scannedItems[currentSession.scannedItems.length - 1];
+    console.log(`[Magento Inventory] Undoing last item:`, lastItem);
+
+    // Reverse the database operation based on the last item
+    if (lastItem.upc || lastItem.refNum) {
+      try {
+        // Find the document that was modified
+        let findQuery = {};
+        if (lastItem.upc) {
+          findQuery.UPC = lastItem.upc;
+        } else if (lastItem.refNum) {
+          findQuery.RefNum = lastItem.refNum;
+        }
+
+        const existingDoc = await MagentoInventory.findOne(findQuery);
+        
+        if (existingDoc) {
+          const newQuantity = Math.max(0, (existingDoc.Quantity || 0) - (lastItem.quantity || 1));
+          
+          if (newQuantity === 0) {
+            // If quantity becomes 0, remove the document entirely
+            await MagentoInventory.deleteOne(findQuery);
+            console.log(`[Magento Inventory] Removed document with quantity 0:`, findQuery);
+          } else {
+            // Otherwise, just reduce the quantity
+            await MagentoInventory.findOneAndUpdate(
+              findQuery,
+              {
+                $set: {
+                  Quantity: newQuantity,
+                  Date: new Date()
+                }
+              }
+            );
+            console.log(`[Magento Inventory] Reduced quantity to ${newQuantity} for:`, findQuery);
+          }
+        }
+      } catch (dbError) {
+        console.error(`[Magento Inventory] Error reversing database operation:`, dbError);
+        // Continue with session cleanup even if database reversal fails
+      }
+    }
+
+    // Remove the last item from session arrays
+    currentSession.scannedItems.pop();
+    
+    if (currentSession.totalPrice && lastItem.price) {
+      currentSession.totalPrice = Math.max(0, currentSession.totalPrice - lastItem.price);
+    }
+
+    // Save the updated session
+    await setSession(sessionId, currentSession);
+
+    console.log(`[Magento Inventory] Undo completed successfully`);
+    return res.json({
+      message: "Last scan undone successfully",
+      action: "undoLastScan",
+      undoneItem: lastItem,
+      remainingItems: currentSession.scannedItems.length,
+      newTotalPrice: currentSession.totalPrice || 0
+    });
+
+  } catch (err) {
+    console.error(`[Magento Inventory] Error in undo endpoint:`, err);
+    res.status(500).json({ error: "Failed to undo last scan" });
   }
 });
