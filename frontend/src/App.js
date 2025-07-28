@@ -47,6 +47,7 @@ function App() {
       qcFlaw: "none",
       manualRef: "",
       mfr: "",
+      customMfr: "",
     };
   });
   const [scannedItems, setScannedItems] = useState(() => {
@@ -118,11 +119,11 @@ function App() {
       if (!message || message === '') {
         setMessage("Tracking Number loaded from previous session! Now scan SKU.");
       }
-      
-      // Restore backend session if we have scanned items
-      if (scannedItems.length > 0) {
-        restoreBackendSession();
-      }
+    }
+    
+    // Always restore backend session if we have tracking number and scanned items
+    if (trackingNumber && scannedItems.length > 0) {
+      restoreBackendSession();
     }
   }, []); // Only run on mount
 
@@ -136,6 +137,12 @@ function App() {
         scannedItems,
         totalPrice
       });
+      
+      // Set dealFound to true after successful restoration
+      if (!dealFound) {
+        setDealFound(true);
+      }
+      
       setMessage("Session restored! Ready to continue scanning or submit to Pipedrive.");
     } catch (error) {
       console.error("Failed to restore backend session:", error);
@@ -330,6 +337,7 @@ function App() {
       qcFlaw: "none",
       manualRef: "",
       mfr: "",
+      customMfr: "",
     });
 
     try {
@@ -531,6 +539,7 @@ function App() {
           qcFlaw: qcFlaw,
           manualRef: manualRef,
           mfr: "",
+          customMfr: "",
         });
       }
     } catch (err) {
@@ -545,6 +554,7 @@ function App() {
           qcFlaw: qcFlaw,
           manualRef: manualRef,
           mfr: "",
+          customMfr: "",
         });
       } else if (err.response?.data?.error?.includes("No deal found for this session")) {
         console.log("Session expired during manual reference, attempting to restore...");
@@ -614,6 +624,7 @@ function App() {
               qcFlaw: qcFlaw,
               manualRef: manualRef,
               mfr: "",
+              customMfr: "",
             });
           }
           
@@ -639,7 +650,7 @@ function App() {
         price: newProduct.price,
         qcFlaw: newProduct.qcFlaw,
         manualRef: newProduct.manualRef,
-        mfr: newProduct.mfr,
+        mfr: newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr,
         sessionId,
         quantity,
       });
@@ -659,7 +670,10 @@ function App() {
         manualRef: newProduct.manualRef,
         size: newProduct.size || "",
         isNew: true,
-        collection: newProduct.mfr && (newProduct.mfr.toUpperCase() === "RESMED" || newProduct.mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock",
+        collection: (() => {
+          const mfr = newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr;
+          return mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock";
+        })(),
         timestamp: new Date().toISOString(),
       };
       setScannedItems(prev => [...prev, newItem]);
@@ -673,6 +687,7 @@ function App() {
         qcFlaw: "none",
         manualRef: "",
         mfr: "",
+        customMfr: "",
       });
       setShowManualRef(false);
       setManualRef("");
@@ -706,7 +721,7 @@ function App() {
             price: newProduct.price,
             qcFlaw: newProduct.qcFlaw,
             manualRef: newProduct.manualRef,
-            mfr: newProduct.mfr,
+            mfr: newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr,
             sessionId,
             quantity,
           });
@@ -726,7 +741,10 @@ function App() {
             manualRef: newProduct.manualRef,
             size: newProduct.size || "",
             isNew: true,
-            collection: newProduct.mfr && (newProduct.mfr.toUpperCase() === "RESMED" || newProduct.mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock",
+            collection: (() => {
+              const mfr = newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr;
+              return mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock";
+            })(),
             timestamp: new Date().toISOString(),
           };
           setScannedItems(prev => [...prev, newItem]);
@@ -740,6 +758,7 @@ function App() {
             qcFlaw: "none",
             manualRef: "",
             mfr: "",
+            customMfr: "",
           });
           setShowManualRef(false);
           setManualRef("");
@@ -1120,14 +1139,34 @@ function App() {
                 setNewProduct({ ...newProduct, manualRef: e.target.value })
               }
             />
-            <input
-              className="input input-bordered w-full mb-2"
-              placeholder="Manufacturer"
+            <select
+              className="select select-bordered w-full mb-2"
               value={newProduct.mfr}
               onChange={(e) =>
                 setNewProduct({ ...newProduct, mfr: e.target.value })
               }
-            />
+            >
+              <option value="">-- Select Manufacturer --</option>
+              <option value="RESMED">RESMED</option>
+              <option value="RESPIRONICS">RESPIRONICS</option>
+              <option value="FISHER & PAYKEL">FISHER & PAYKEL</option>
+              <option value="SUNSET">SUNSET</option>
+              <option value="3B MEDICAL">3B MEDICAL</option>
+              <option value="CAREFUSION">CAREFUSION</option>
+              <option value="N/A">N/A</option>
+              <option value="Other">Other</option>
+            </select>
+            {newProduct.mfr === "Other" && (
+              <input
+                className="input input-bordered w-full mb-2"
+                placeholder="Enter custom manufacturer"
+                value={newProduct.customMfr || ""}
+                onChange={(e) =>
+                  setNewProduct({ ...newProduct, customMfr: e.target.value })
+                }
+                required
+              />
+            )}
             <select
               className="select select-bordered w-full mb-2"
               value={newProduct.qcFlaw}

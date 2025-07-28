@@ -69,6 +69,8 @@ function PriceManagement() {
         updateData.style = editValue;
       } else if (editingField.field === 'size') {
         updateData.size = editValue;
+      } else if (editingField.field === 'collection') {
+        updateData.collection = editValue;
       }
 
       const response = await api.put(`/api/products/${product.collection}/${product._id}`, updateData);
@@ -89,8 +91,8 @@ function PriceManagement() {
               Style: response.data.product.Style,
               Size: response.data.product.Size,
               Price: response.data.product.Price,
-              // Keep the collection field from original product
-              collection: p.collection
+              // Update collection field if it was edited
+              collection: response.data.product.collection || p.collection
             }
           : p
       ));
@@ -139,6 +141,26 @@ function PriceManagement() {
     const isEditing = editingField && editingField.productId === compositeId && editingField.field === field;
     
     if (isEditing) {
+      // Special handling for collection field as dropdown
+      if (field === 'collection') {
+        return (
+          <select
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={handleKeyPress}
+            onBlur={handleSaveField}
+            className="w-full px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+            disabled={saving}
+            autoFocus
+          >
+            <option value="Inventory">Inventory</option>
+            <option value="Overstock">Overstock</option>
+            <option value="MonthEndInventory">MonthEndInventory</option>
+            <option value="MonthEndOverstock">MonthEndOverstock</option>
+          </select>
+        );
+      }
+      
       return (
         <input
           type={isNumber ? "number" : "text"}
