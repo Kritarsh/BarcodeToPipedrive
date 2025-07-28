@@ -722,8 +722,37 @@ app.post("/api/barcode/undo", async (req, res) => {
       return res.status(400).json({ error: "No items to undo" });
     }
 
+    // Get the last item before removing it
+    const undoneItem = currentSession.skuEntries[currentSession.skuEntries.length - 1];
+    
+    // Try to decrement quantity in the database if the item has collection/UPC info
+    if (undoneItem.collection && undoneItem.upc) {
+      try {
+        const monthEndCollection = undoneItem.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
+        
+        // Find the document and decrement quantity by 1
+        const doc = await monthEndCollection.findOne({ UPC: undoneItem.upc });
+        if (doc && doc.Quantity > 0) {
+          const newQuantity = Math.max(0, doc.Quantity - 1);
+          await monthEndCollection.findOneAndUpdate(
+            { UPC: undoneItem.upc },
+            {
+              $set: {
+                Quantity: newQuantity,
+                Date: new Date()
+              }
+            }
+          );
+          console.log(`[Undo] Decremented quantity to ${newQuantity} for UPC: ${undoneItem.upc}`);
+        }
+      } catch (dbError) {
+        console.error("Error decrementing database quantity:", dbError);
+        // Continue with session cleanup even if database update fails
+      }
+    }
+
     // Remove the last item from the session
-    const undoneItem = currentSession.skuEntries.pop();
+    currentSession.skuEntries.pop();
     
     // Also remove from noteContent and prices if they exist
     if (currentSession.noteContent && currentSession.noteContent.length > 0) {
@@ -2133,25 +2162,19 @@ app.post("/api/magento-inventory/undo", async (req, res) => {
         const existingDoc = await MagentoInventory.findOne(findQuery);
         
         if (existingDoc) {
-          const newQuantity = Math.max(0, (existingDoc.Quantity || 0) - (lastItem.quantity || 1));
+          const newQuantity = Math.max(0, (existingDoc.Quantity || 0) - 1);
           
-          if (newQuantity === 0) {
-            // If quantity becomes 0, remove the document entirely
-            await MagentoInventory.deleteOne(findQuery);
-            console.log(`[Magento Inventory] Removed document with quantity 0:`, findQuery);
-          } else {
-            // Otherwise, just reduce the quantity
-            await MagentoInventory.findOneAndUpdate(
-              findQuery,
-              {
-                $set: {
-                  Quantity: newQuantity,
-                  Date: new Date()
-                }
+          // Always just decrement quantity, never remove the document
+          await MagentoInventory.findOneAndUpdate(
+            findQuery,
+            {
+              $set: {
+                Quantity: newQuantity,
+                Date: new Date()
               }
-            );
-            console.log(`[Magento Inventory] Reduced quantity to ${newQuantity} for:`, findQuery);
-          }
+            }
+          );
+          console.log(`[Magento Inventory] Reduced quantity to ${newQuantity} for:`, findQuery);
         }
       } catch (dbError) {
         console.error(`[Magento Inventory] Error reversing database operation:`, dbError);

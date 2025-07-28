@@ -845,13 +845,7 @@ function App() {
                 onManualEntry={handleManualEntry}
                 onNoBarcodeEntry={handleNoBarcodeEntry}
                 selectedMachine={selectedMachine}
-              />              {showManualRef && (
-                <ManualRefForm
-                  manualRef={manualRef}
-                  setManualRef={setManualRef}
-                  handleManualRefSubmit={handleManualRefSubmit}
-                  manualRefInputRef={manualRefInputRef}
-                />              )}
+              />
               
               {/* Add the Undo Button */}
               <button
@@ -997,56 +991,62 @@ function App() {
             </h3>
             <div className="max-h-[60vh] overflow-y-auto">
               <div className="space-y-3">
-                {scannedItems.map((item, index) => (
-                  <div key={index} className="p-4 bg-base-200 rounded-lg border">
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="font-semibold text-lg text-base-content">
-                          {item.description}
+                {[...scannedItems].reverse().map((item, index) => {
+                  const originalIndex = scannedItems.length - 1 - index; // Calculate original index for key
+                  return (
+                    <div key={originalIndex} className="p-4 bg-base-200 rounded-lg border">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="font-semibold text-lg text-base-content">
+                            {item.description}
+                            {index === 0 && (
+                              <span className="badge badge-primary ml-2 text-xs">Latest</span>
+                            )}
+                          </div>
+                          <div className="text-sm text-base-content/70 mt-1">
+                            SKU: {item.sku || "N/A"}
+                            {item.size && ` • Size: ${item.size}`}
+                            {item.serialNumber && ` • Serial: ${item.serialNumber}`}
+                            {item.manualRef && ` • Ref: ${item.manualRef}`}
+                          </div>
+                          {(item.qcFlaw && item.qcFlaw !== "none") && (
+                            <div className="badge badge-warning mt-2">
+                              {item.qcFlaw}
+                            </div>
+                          )}
+                          {item.isNew && (
+                            <div className="badge badge-success mt-2 ml-2">
+                              New Product
+                            </div>
+                          )}
+                          {item.isMachine && (
+                            <div className="badge badge-info mt-2 ml-2">
+                              Machine
+                            </div>
+                          )}
                         </div>
-                        <div className="text-sm text-base-content/70 mt-1">
-                          SKU: {item.sku || "N/A"}
-                          {item.size && ` • Size: ${item.size}`}
-                          {item.serialNumber && ` • Serial: ${item.serialNumber}`}
-                          {item.manualRef && ` • Ref: ${item.manualRef}`}
+                        <div className="text-right ml-4">
+                          <div className="text-lg font-bold text-success">
+                            ${item.price?.toFixed(2) || "0.00"}
+                          </div>
+                          {item.quantity && item.quantity > 1 && (
+                            <div className="text-sm text-base-content/70">
+                              Qty: {item.quantity}
+                            </div>
+                          )}
+                          {item.quantity && item.quantity > 1 && (
+                            <div className="text-sm font-semibold text-primary">
+                              Total: ${((item.price || 0) * item.quantity).toFixed(2)}
+                            </div>
+                          )}
                         </div>
-                        {(item.qcFlaw && item.qcFlaw !== "none") && (
-                          <div className="badge badge-warning mt-2">
-                            {item.qcFlaw}
-                          </div>
-                        )}
-                        {item.isNew && (
-                          <div className="badge badge-success mt-2 ml-2">
-                            New Product
-                          </div>
-                        )}
-                        {item.isMachine && (
-                          <div className="badge badge-info mt-2 ml-2">
-                            Machine
-                          </div>
-                        )}
                       </div>
-                      <div className="text-right ml-4">
-                        <div className="text-lg font-bold text-success">
-                          ${item.price?.toFixed(2) || "0.00"}
-                        </div>
-                        {item.quantity && item.quantity > 1 && (
-                          <div className="text-sm text-base-content/70">
-                            Qty: {item.quantity}
-                          </div>
-                        )}
-                        {item.quantity && item.quantity > 1 && (
-                          <div className="text-sm font-semibold text-primary">
-                            Total: ${((item.price || 0) * item.quantity).toFixed(2)}
-                          </div>
-                        )}
+                      <div className="text-xs text-base-content/50 mt-2">
+                        {new Date(item.timestamp).toLocaleString()}
                       </div>
                     </div>
-                    <div className="text-xs text-base-content/50 mt-2">
-                      {new Date(item.timestamp).toLocaleString()}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
             <div className="mt-4 p-4 bg-primary text-primary-content rounded-lg">
@@ -1150,6 +1150,53 @@ function App() {
           </form>
         )}
       </div>
+
+      {/* Manual Reference Modal */}
+      {showManualRef && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-sm">
+            <h3 className="font-bold text-lg mb-3">Manual Reference Entry</h3>
+            <p className="text-sm text-base-content/70 mb-3">
+              SKU not found in spreadsheet. Please enter a manual reference number:
+            </p>
+            <form onSubmit={handleManualRefSubmit}>
+              <input
+                ref={manualRefInputRef}
+                type="text"
+                placeholder="Enter manual reference number"
+                className="input input-bordered input-sm w-full mb-3"
+                value={manualRef}
+                onChange={(e) => setManualRef(e.target.value)}
+                autoFocus
+                required
+              />
+              <div className="flex gap-2 justify-between">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-xs flex-1"
+                  onClick={() => {
+                    setShowManualRef(false);
+                    setManualRef("");
+                    setPendingSku("");
+                    setMessage("Manual reference cancelled.");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-xs flex-1">
+                  Search
+                </button>
+              </div>
+            </form>
+          </div>
+          <div className="modal-backdrop" onClick={() => {
+            setShowManualRef(false);
+            setManualRef("");
+            setPendingSku("");
+            setMessage("Manual reference cancelled.");
+          }}></div>
+        </div>
+      )}
     </div>
   );
 }

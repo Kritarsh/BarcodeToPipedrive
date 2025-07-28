@@ -459,14 +459,29 @@ function MagentoInventory() {
       
       // Update the local state based on the undo response
       if (res.data.undoneItem && scannedItems.length > 0) {
-        // Remove the last item from local scanned items
-        setScannedItems((prev) => prev.slice(0, -1));
+        const lastItem = scannedItems[scannedItems.length - 1];
         
-        // Update total price
+        // Always decrement quantity by 1, remove item only if quantity becomes 0
+        if (lastItem.quantity > 1) {
+          // Decrement quantity of the last item
+          setScannedItems((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              quantity: updated[updated.length - 1].quantity - 1
+            };
+            return updated;
+          });
+        } else {
+          // Remove the last item if quantity is 1 (becomes 0)
+          setScannedItems((prev) => prev.slice(0, -1));
+        }
+        
+        // Update total price (subtract the price of 1 item)
         if (res.data.newTotalPrice !== undefined) {
           setTotalPrice(res.data.newTotalPrice);
         } else if (res.data.undoneItem.price) {
-          setTotalPrice((prev) => Math.max(0, prev - (res.data.undoneItem.price * (res.data.undoneItem.quantity || 1))));
+          setTotalPrice((prev) => Math.max(0, prev - res.data.undoneItem.price));
         }
       }
 
