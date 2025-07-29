@@ -61,7 +61,6 @@ function MonthEndInventory() {
   // MongoDB data states for Month End collections
   const [monthEndInventoryData, setMonthEndInventoryData] = useState([]);
   const [monthEndOverstockData, setMonthEndOverstockData] = useState([]);
-  const [magentoInventoryData, setMagentoInventoryData] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState("monthEndInventory");
 
   useEffect(() => {
@@ -165,15 +164,6 @@ function MonthEndInventory() {
         setMonthEndOverstockData(res.data.data);
       })
       .catch(() => setMonthEndOverstockData([]));
-
-    // Refresh Magento Inventory data
-    axios
-      .get(`${apiUrl}/api/magento-inventory`)
-      .then((res) => {
-        console.log("Refreshed Magento Inventory Data:", res.data.data);
-        setMagentoInventoryData(res.data.data);
-      })
-      .catch(() => setMagentoInventoryData([]));
   };
 
   // Fetch Month End Inventory data
@@ -196,17 +186,6 @@ function MonthEndInventory() {
         setMonthEndOverstockData(res.data.data);
       })
       .catch(() => setMonthEndOverstockData([]));
-  }, []);
-
-  // Fetch Magento Inventory data
-  useEffect(() => {
-    axios
-      .get(`${apiUrl}/api/magento-inventory`)
-      .then((res) => {
-        console.log("Magento Inventory Data:", res.data.data);
-        setMagentoInventoryData(res.data.data);
-      })
-      .catch(() => setMagentoInventoryData([]));
   }, []);
 
 
@@ -524,8 +503,9 @@ function MonthEndInventory() {
         endpoint = "/api/month-end-inventory/export-csv";
       } else if (selectedCollection === "monthEndOverstock") {
         endpoint = "/api/month-end-overstock/export-csv";
-      } else if (selectedCollection === "magentoInventory") {
-        endpoint = "/api/magento-inventory/export-csv";
+      } else {
+        setMessage("Invalid collection selected");
+        return;
       }
       
       const response = await fetch(`${apiUrl}${endpoint}`);
@@ -560,9 +540,8 @@ function MonthEndInventory() {
       window.URL.revokeObjectURL(url);
       
       const collectionNames = {
-        monthEndInventory: "Inventory",
-        monthEndOverstock: "Overstock", 
-        magentoInventory: "Magento Inventory"
+        monthEndInventory: "Month End Inventory",
+        monthEndOverstock: "Month End Overstock"
       };
       setMessage(`${collectionNames[selectedCollection]} CSV exported successfully!`);
     } catch (error) {
@@ -575,12 +554,10 @@ function MonthEndInventory() {
   let tableData = [];
   if (selectedCollection === "monthEndInventory") tableData = monthEndInventoryData;
   else if (selectedCollection === "monthEndOverstock") tableData = monthEndOverstockData;
-  else if (selectedCollection === "magentoInventory") tableData = magentoInventoryData;
 
   const fieldOrders = {
     monthEndInventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"],
-    monthEndOverstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"],
-    magentoInventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"],
+    monthEndOverstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"]
   };
   const currentFieldOrder = fieldOrders[selectedCollection] || [];
 
@@ -795,7 +772,6 @@ function MonthEndInventory() {
               >
                 <option value="monthEndInventory">Month End Inventory</option>
                 <option value="monthEndOverstock">Month End Overstock</option>
-                <option value="magentoInventory">Magento Inventory</option>
               </select>
               <button
                 onClick={handleExportCSV}

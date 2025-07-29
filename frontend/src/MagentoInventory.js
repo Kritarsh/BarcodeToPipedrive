@@ -448,9 +448,42 @@ function MagentoInventory() {
     });
   };
 
-  // Undo last scan function
+  // Undo last action function - handles both scanned items and workflow states
   const handleUndoLastScan = async () => {
     try {
+      // First check if there are local workflow states to undo (like manual ref or new product forms)
+      if (showNewProductForm) {
+        // Undo new product form - go back to manual reference
+        setMessage("Cancelled new product form, returning to manual reference");
+        setShowNewProductForm(false);
+        setNewProduct({
+          name: "",
+          refNum: "",
+          price: "",
+          quantity: "",
+          manufacturer: "",
+          size: "",
+        });
+        return;
+      }
+      
+      if (showManualRef) {
+        // Undo manual reference form - clear everything and return to main scan
+        setMessage("Cancelled manual reference entry");
+        setShowManualRef(false);
+        setManualRef("");
+        setPendingSku("");
+        setSku("");
+        setQcFlaw("none");
+        setSerialNumber("");
+        setQuantity(1);
+        if (skuInputRef.current) {
+          skuInputRef.current.focus();
+        }
+        return;
+      }
+
+      // If no local workflow states, call backend undo for scanned items
       const res = await axios.post(`${apiUrl}/api/magento-inventory/undo`, {
         sessionId,
       });
@@ -663,9 +696,9 @@ function MagentoInventory() {
                 <button
                   onClick={handleUndoLastScan}
                   className="btn btn-warning flex-1"
-                  disabled={scannedItems.length === 0}
+                  disabled={scannedItems.length === 0 && !showManualRef && !showNewProductForm}
                 >
-                  ↶ Undo Last Scan
+                  ↶ Undo Last Action
                 </button>
                 <button
                   onClick={handleFinishMagento}
@@ -677,6 +710,18 @@ function MagentoInventory() {
             </div>
           )}
 
+          {/* Show undo button for any undoable workflow state */}
+          {(scannedItems.length === 0 && (showManualRef || showNewProductForm)) && (
+            <div className="mb-4">
+              <button
+                onClick={handleUndoLastScan}
+                className="btn btn-warning w-full"
+              >
+                ↶ Undo Last Action
+              </button>
+            </div>
+          )}
+
           <div className="mt-4">
             <a href="/" className="btn btn-outline w-full">
               Back to Main Inventory
@@ -685,32 +730,32 @@ function MagentoInventory() {
         </div>
       </div>
 
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="card bg-base-100 shadow-xl">
-          <div className="card-body">
+      <div className="flex-1 p-6 flex flex-col">
+        <div className="card bg-base-100 shadow-xl flex-1 flex flex-col mr-6">
+          <div className="card-body flex-1 flex flex-col">
             <h2 className="card-title text-2xl mb-4">Magento Inventory Data</h2>
-            <div className="mb-4 flex gap-2">
+            <div className="mb-4 flex gap-4 flex-wrap">
               <button
                 onClick={handleExportCSV}
-                className="btn btn-outline btn-primary"
+                className="btn btn-outline btn-primary flex-1 min-w-0"
                 disabled={magentoInventoryData.length === 0}
               >
                 📊 Export CSV
               </button>
               <button
                 onClick={refreshMagentoData}
-                className="btn btn-outline btn-secondary"
+                className="btn btn-outline btn-secondary flex-1 min-w-0"
               >
                 🔄 Refresh Data
               </button>
             </div>
-            <div className="overflow-x-auto">
+            <div className="flex-1 overflow-auto border border-base-content rounded-lg">
               {magentoInventoryData.length > 0 ? (
-                <table className="table table-xs border border-base-content border-solid">
-                  <thead>
+                <table className="table table-xs w-full">
+                  <thead className="sticky top-0 bg-base-200">
                     <tr>
                       {fieldOrder.map((field) => (
-                        <th key={field} className="border border-base-content border-solid">
+                        <th key={field} className="border border-base-content border-solid px-2 py-1 text-xs">
                           {field}
                         </th>
                       ))}
@@ -718,9 +763,9 @@ function MagentoInventory() {
                   </thead>
                   <tbody>
                     {magentoInventoryData.map((row, i) => (
-                      <tr key={i}>
+                      <tr key={i} className="hover:bg-base-100">
                         {fieldOrder.map((field) => (
-                          <td key={field} className="border border-base-content border-solid">
+                          <td key={field} className="border border-base-content border-solid px-2 py-1 text-xs break-words">
                             {field === 'Price' && row[field] 
                               ? `$${parseFloat(row[field]).toFixed(2)}`
                               : row[field] || ""
@@ -732,7 +777,9 @@ function MagentoInventory() {
                   </tbody>
                 </table>
               ) : (
-                <p className="text-center text-base-content/60">No Magento inventory data available.</p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-center text-base-content/60">No Magento inventory data available.</p>
+                </div>
               )}
             </div>
           </div>
