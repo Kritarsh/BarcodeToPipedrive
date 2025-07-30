@@ -45,6 +45,7 @@ function MagentoInventory() {
       quantity: "",
       manufacturer: "",
       size: "",
+      customManufacturer: false,
     };
   });
   const [scannedItems, setScannedItems] = useState(() => {
@@ -282,6 +283,7 @@ function MagentoInventory() {
           quantity: quantity || 1,
           manufacturer: "",
           size: "",
+          customManufacturer: false,
         });
       }
     } catch (error) {
@@ -336,6 +338,7 @@ function MagentoInventory() {
         quantity: "",
         manufacturer: "",
         size: "",
+        customManufacturer: false,
       });
 
       // Refresh the magento data to show the new item
@@ -484,6 +487,7 @@ function MagentoInventory() {
           quantity: "",
           manufacturer: "",
           size: "",
+          customManufacturer: false,
         });
         return;
       }
@@ -644,15 +648,45 @@ function MagentoInventory() {
                   setNewProduct({ ...newProduct, quantity: e.target.value })
                 }
               />
-              <input
-                type="text"
-                placeholder="Manufacturer"
-                className="input input-bordered w-full mb-2"
-                value={newProduct.manufacturer}
-                onChange={(e) =>
-                  setNewProduct({ ...newProduct, manufacturer: e.target.value })
-                }
-              />
+              
+              {/* Manufacturer Dropdown */}
+              <div className="mb-2">
+                <select
+                  className="select select-bordered w-full"
+                  value={newProduct.manufacturer === "RESMED" || newProduct.manufacturer === "RESPIRONICS" || newProduct.manufacturer === "FISHER & PAYKEL" || newProduct.manufacturer === "SUNSET" || newProduct.manufacturer === "3B MEDICAL" || newProduct.manufacturer === "CAREFUSION" || newProduct.manufacturer === "N/A" || newProduct.manufacturer === "" ? newProduct.manufacturer : "Other"}
+                  onChange={(e) => {
+                    if (e.target.value === "Other") {
+                      setNewProduct({ ...newProduct, manufacturer: "", customManufacturer: true });
+                    } else {
+                      setNewProduct({ ...newProduct, manufacturer: e.target.value, customManufacturer: false });
+                    }
+                  }}
+                >
+                  <option value="">-- Select Manufacturer --</option>
+                  <option value="RESMED">RESMED</option>
+                  <option value="RESPIRONICS">RESPIRONICS</option>
+                  <option value="FISHER & PAYKEL">FISHER & PAYKEL</option>
+                  <option value="SUNSET">SUNSET</option>
+                  <option value="3B MEDICAL">3B MEDICAL</option>
+                  <option value="CAREFUSION">CAREFUSION</option>
+                  <option value="N/A">N/A</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              
+              {/* Custom Manufacturer Input */}
+              {(newProduct.customManufacturer || (newProduct.manufacturer && !["RESMED", "RESPIRONICS", "FISHER & PAYKEL", "SUNSET", "3B MEDICAL", "CAREFUSION", "N/A", ""].includes(newProduct.manufacturer))) && (
+                <input
+                  type="text"
+                  placeholder="Enter custom manufacturer"
+                  className="input input-bordered w-full mb-2"
+                  value={newProduct.manufacturer}
+                  onChange={(e) =>
+                    setNewProduct({ ...newProduct, manufacturer: e.target.value })
+                  }
+                />
+              )}
+              
               <input
                 type="text"
                 placeholder="Size"

@@ -45,6 +45,7 @@ function MonthEndInventory() {
       qcFlaw: "none",
       manualRef: "",
       mfr: "",
+      customMfr: false,
     };
   });
   const [scannedItems, setScannedItems] = useState(() => {
@@ -345,6 +346,7 @@ function MonthEndInventory() {
           qcFlaw: qcFlaw,
           manualRef: manualRef,
           mfr: "",
+          customMfr: false,
         });
       }
     } catch (error) {
@@ -391,6 +393,7 @@ function MonthEndInventory() {
         qcFlaw: "none",
         manualRef: "",
         mfr: "",
+        customMfr: false,
       });
 
       // Refresh the month end data to show the new item
@@ -525,6 +528,7 @@ function MonthEndInventory() {
             qcFlaw: "none",
             manualRef: "",
             mfr: "",
+            customMfr: false,
           });
           setMessage(`Cancelled new product form for: ${res.data.clearedSku}`);
         }
@@ -743,15 +747,45 @@ function MonthEndInventory() {
                 }
                 required
               />
-              <input
-                type="text"
-                placeholder="Manufacturer"
-                className="input input-bordered w-full mb-2"
-                value={newProduct.mfr}
-                onChange={(e) =>
-                  setNewProduct({ ...newProduct, mfr: e.target.value })
-                }
-              />
+              
+              {/* Manufacturer Dropdown */}
+              <div className="mb-2">
+                <select
+                  className="select select-bordered w-full"
+                  value={newProduct.mfr === "RESMED" || newProduct.mfr === "RESPIRONICS" || newProduct.mfr === "FISHER & PAYKEL" || newProduct.mfr === "SUNSET" || newProduct.mfr === "3B MEDICAL" || newProduct.mfr === "CAREFUSION" || newProduct.mfr === "N/A" || newProduct.mfr === "" ? newProduct.mfr : "Other"}
+                  onChange={(e) => {
+                    if (e.target.value === "Other") {
+                      setNewProduct({ ...newProduct, mfr: "", customMfr: true });
+                    } else {
+                      setNewProduct({ ...newProduct, mfr: e.target.value, customMfr: false });
+                    }
+                  }}
+                >
+                  <option value="">-- Select Manufacturer --</option>
+                  <option value="RESMED">RESMED</option>
+                  <option value="RESPIRONICS">RESPIRONICS</option>
+                  <option value="FISHER & PAYKEL">FISHER & PAYKEL</option>
+                  <option value="SUNSET">SUNSET</option>
+                  <option value="3B MEDICAL">3B MEDICAL</option>
+                  <option value="CAREFUSION">CAREFUSION</option>
+                  <option value="N/A">N/A</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              
+              {/* Custom Manufacturer Input */}
+              {(newProduct.customMfr || (newProduct.mfr && !["RESMED", "RESPIRONICS", "FISHER & PAYKEL", "SUNSET", "3B MEDICAL", "CAREFUSION", "N/A", ""].includes(newProduct.mfr))) && (
+                <input
+                  type="text"
+                  placeholder="Enter custom manufacturer"
+                  className="input input-bordered w-full mb-2"
+                  value={newProduct.mfr}
+                  onChange={(e) =>
+                    setNewProduct({ ...newProduct, mfr: e.target.value })
+                  }
+                />
+              )}
+              
               <button type="submit" className="btn btn-primary w-full">
                 Add Product
               </button>
