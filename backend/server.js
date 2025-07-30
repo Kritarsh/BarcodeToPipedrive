@@ -897,6 +897,112 @@ app.post("/api/product/new", async (req, res) => {
   }
 });
 
+// PUT endpoint for updating products in any collection
+app.put("/api/products/:collection/:id", async (req, res) => {
+  try {
+    const { collection, id } = req.params;
+    const updateData = req.body;
+    
+    console.log(`Updating product ${id} in collection ${collection}:`, updateData);
+
+    // Map collection names to actual MongoDB models
+    let Model;
+    switch (collection) {
+      case 'Inventory':
+        Model = Inventory;
+        break;
+      case 'Overstock':
+        Model = Overstock;
+        break;
+      case 'MonthEndInventory':
+        Model = MonthEndInventory;
+        break;
+      case 'MonthEndOverstock':
+        Model = MonthEndOverstock;
+        break;
+      case 'MagentoInventory':
+        Model = MagentoInventory;
+        break;
+      default:
+        return res.status(400).json({ error: "Invalid collection specified" });
+    }
+
+    // Build update object with proper field mapping
+    const updateObject = {};
+    if (updateData.price !== undefined) updateObject.Price = updateData.price;
+    if (updateData.refNum !== undefined) updateObject.RefNum = updateData.refNum;
+    if (updateData.upc !== undefined) updateObject.UPC = updateData.upc;
+    if (updateData.mfr !== undefined) updateObject.MFR = updateData.mfr;
+    if (updateData.style !== undefined) updateObject.Style = updateData.style;
+    if (updateData.size !== undefined) updateObject.Size = updateData.size;
+    
+    // Always update the Date when making changes
+    updateObject.Date = new Date();
+
+    const updatedProduct = await Model.findByIdAndUpdate(
+      id,
+      { $set: updateObject },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    console.log(`Successfully updated product ${id} in ${collection}`);
+    res.json({ 
+      success: true, 
+      message: "Product updated successfully",
+      product: {
+        ...updatedProduct.toObject(),
+        collection: collection
+      }
+    });
+
+  } catch (err) {
+    console.error("Error updating product:", err);
+    res.status(500).json({ error: "Failed to update product" });
+  }
+});
+
+// Products prices endpoint for Price Management
+app.get("/api/products/prices", async (req, res) => {
+  try {
+    console.log("Fetching all products with pricing information...");
+    
+    // Fetch data from all collections
+    const [inventoryData, overstockData, monthEndInventoryData, monthEndOverstockData, magentoInventoryData] = await Promise.all([
+      Inventory.find().lean(),
+      Overstock.find().lean(),
+      MonthEndInventory.find().lean(),
+      MonthEndOverstock.find().lean(),
+      MagentoInventory.find().lean()
+    ]);
+
+    // Add collection identifier to each product
+    const allProducts = [
+      ...inventoryData.map(item => ({ ...item, collection: 'Inventory' })),
+      ...overstockData.map(item => ({ ...item, collection: 'Overstock' })),
+      ...monthEndInventoryData.map(item => ({ ...item, collection: 'MonthEndInventory' })),
+      ...monthEndOverstockData.map(item => ({ ...item, collection: 'MonthEndOverstock' })),
+      ...magentoInventoryData.map(item => ({ ...item, collection: 'MagentoInventory' }))
+    ];
+
+    console.log(`Found ${allProducts.length} total products across all collections`);
+    
+    // Convert Decimal128 Price values to numbers for frontend
+    const processedProducts = allProducts.map(item => ({
+      ...item,
+      Price: item.Price ? parseFloat(item.Price.toString()) : 0
+    }));
+    
+    res.json(processedProducts);
+  } catch (err) {
+    console.error("Error fetching products with prices:", err);
+    res.status(500).json({ error: "Failed to fetch products with pricing information" });
+  }
+});
+
 // New endpoint to fetch inventory data from MongoDB
 app.get("/api/inventory", async (req, res) => {
   try {
@@ -933,7 +1039,7 @@ app.get("/api/month-end-inventory", async (req, res) => {
     console.log("Attempting to fetch Month End Inventory data...");
     console.log("MonthEndInventory model collection name:", MonthEndInventory.collection.name);
     
-    const monthEndInventoryData = await MonthEndInventory.find();
+    const monthEndInventoryData = await MonthEndInventory.find().sort({ Date: -1 });
     console.log("Found Month End Inventory documents:", monthEndInventoryData.length);
     console.log("Sample document:", monthEndInventoryData[0]);
     
@@ -955,7 +1061,7 @@ app.get("/api/month-end-overstock", async (req, res) => {
     console.log("Attempting to fetch Month End Overstock data...");
     console.log("MonthEndOverstock model collection name:", MonthEndOverstock.collection.name);
     
-    const monthEndOverstockData = await MonthEndOverstock.find();
+    const monthEndOverstockData = await MonthEndOverstock.find().sort({ Date: -1 });
     console.log("Found Month End Overstock documents:", monthEndOverstockData.length);
     console.log("Sample document:", monthEndOverstockData[0]);
     
@@ -972,7 +1078,7 @@ app.get("/api/magento-inventory", async (req, res) => {
     console.log("Attempting to fetch Magento Inventory data...");
     console.log("MagentoInventory model collection name:", MagentoInventory.collection.name);
     
-    const magentoInventoryData = await MagentoInventory.find();
+    const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
     console.log("Found Magento Inventory documents:", magentoInventoryData.length);
     console.log("Sample document:", magentoInventoryData[0]);
     
@@ -993,7 +1099,7 @@ app.get("/api/magento-inventory", async (req, res) => {
 app.get("/api/magento-inventory/export-csv", async (req, res) => {
   try {
     console.log("CSV Export request received for Magento Inventory");
-    const magentoInventoryData = await MagentoInventory.find();
+    const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
     console.log("Found documents for export:", magentoInventoryData.length);
     
     // Define CSV headers
@@ -1044,7 +1150,7 @@ app.get("/api/month-end-inventory/test", (req, res) => {
 app.get("/api/month-end-inventory/export-csv", async (req, res) => {
   try {
     console.log("CSV Export request received for Month End Inventory");
-    const monthEndInventoryData = await MonthEndInventory.find();
+    const monthEndInventoryData = await MonthEndInventory.find().sort({ Date: -1 });
     console.log("Found documents for export:", monthEndInventoryData.length);
     
     // Define CSV headers
@@ -1090,7 +1196,7 @@ app.get("/api/month-end-inventory/export-csv", async (req, res) => {
 app.get("/api/month-end-overstock/export-csv", async (req, res) => {
   try {
     console.log("CSV Export request received for Month End Overstock");
-    const monthEndOverstockData = await MonthEndOverstock.find();
+    const monthEndOverstockData = await MonthEndOverstock.find().sort({ Date: -1 });
     console.log("Found documents for export:", monthEndOverstockData.length);
     
     // Define CSV headers
@@ -1216,7 +1322,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
           qcFlaw: qcFlaw,
           serialNumber: barcode, // The serial number is in the barcode field when using dropdown
           price: machinePrice,
-          quantity: quantity, // Add quantity field
+          quantity: quantity, // Add quantity to machine entry
           isMachine: true,
           upc: barcode, // This is the serial number when machineType is provided
           name: machineName,
@@ -1529,12 +1635,179 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
   });
 });
 
+// Month End new product endpoint
+app.post("/api/month-end/product/new", async (req, res) => {
+  console.log("🔥 MONTH END NEW PRODUCT HANDLER HIT!", req.body);
+  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr, quantity = 1, serialNumber } = req.body;
+  if (!description || !sessionId) {
+    return res.status(400).json({ error: "description and sessionId are required" });
+  }
+
+  try {
+    // Determine which collection to use based on manufacturer
+    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
+    
+    // Calculate price using existing pricing logic or provided price
+    const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
+    
+    // Save directly to Month End collection (this is the key difference from regular new product)
+    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
+    const monthEndProduct = await monthEndCollection.findOneAndUpdate(
+      {
+        // Use RefNum as primary key if provided, otherwise use UPC (if available), otherwise use Style+Size+MFR
+        ...(manualRef ? 
+          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
+          barcode ? 
+            { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
+            { Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } // Fallback to style+size+mfr
+        )
+      },
+      {
+        $inc: { Quantity: quantity }, // Increment quantity for new products in Month End
+        $setOnInsert: { 
+          ...(manualRef ? {} : { RefNum: manualRef || "" }), // Set RefNum on insert
+          ...(barcode ? {} : { UPC: barcode || "" }), // Set UPC on insert
+        },
+        $set: { 
+          ...(barcode && { UPC: barcode }), // Set UPC if barcode exists
+          ...(manualRef && { RefNum: manualRef }), // Set RefNum if manualRef exists
+          Date: new Date(),
+          Price: calculatedPrice
+        }
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true
+      }
+    );
+
+    // Add to session
+    const currentSession = await getSession(sessionId);
+    
+    // Clear pending state since we're successfully adding the product
+    if (currentSession.pendingState) {
+      delete currentSession.pendingState;
+    }
+    
+    if (!currentSession.noteContent) currentSession.noteContent = [];
+    currentSession.noteContent.push(`New product added: ${description}. Price: $${calculatedPrice}${qcFlaw && qcFlaw !== "none" ? ` [Flaw: ${qcFlawLabel(qcFlaw)}]` : ""}${serialNumber ? ` Serial: ${serialNumber}` : ""}`);
+
+    if (!currentSession.prices) currentSession.prices = [];
+    currentSession.prices.push(calculatedPrice);
+
+    if (!currentSession.skuEntries) currentSession.skuEntries = [];
+    currentSession.skuEntries.push({
+      description,
+      size: size || "",
+      qcFlaw: qcFlaw || "none",
+      serialNumber: serialNumber || "",
+      price: calculatedPrice,
+      quantity: quantity,
+      isManual: true,
+      upc: barcode || "",
+      refNum: manualRef || "",
+      collection: isInventoryItem ? "Inventory" : "Overstock",
+    });
+    
+    await setSession(sessionId, currentSession);
+
+    console.log(`[Month End] New product added to ${isInventoryItem ? "MonthEndInventory" : "MonthEndOverstock"}:`, monthEndProduct);
+
+    return res.json({ 
+      message: "Product added to month end inventory successfully!", 
+      product: monthEndProduct,
+      price: calculatedPrice
+    });
+  } catch (err) {
+    console.error("Error adding new product to month end:", err);
+    return res.status(500).json({ error: "Failed to add new product to month end inventory" });
+  }
+});
+
+// Helper function to generate CSV content for Month End Inventory
+async function generateMonthEndInventoryCSV() {
+  const monthEndInventoryData = await MonthEndInventory.find().sort({ Date: -1 });
+  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+  let csvContent = headers.join(",") + "\n";
+  
+  monthEndInventoryData.forEach(item => {
+    const row = [
+      `"${item.RefNum || ""}"`,
+      `"${item.UPC || ""}"`,
+      `"${item.MFR || ""}"`,
+      `"${item.Style || ""}"`,
+      `"${item.Size || ""}"`,
+      item.Quantity || 0,
+      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+  
+  return csvContent;
+}
+
+// Helper function to generate CSV content for Month End Overstock
+async function generateMonthEndOverstockCSV() {
+  const monthEndOverstockData = await MonthEndOverstock.find().sort({ Date: -1 });
+  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+  let csvContent = headers.join(",") + "\n";
+  
+  monthEndOverstockData.forEach(item => {
+    const row = [
+      `"${item.RefNum || ""}"`,
+      `"${item.UPC || ""}"`,
+      `"${item.MFR || ""}"`,
+      `"${item.Style || ""}"`,
+      `"${item.Size || ""}"`,
+      item.Quantity || 0,
+      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+  
+  return csvContent;
+}
+
+// Helper function to generate CSV content for Magento Inventory
+async function generateMagentoInventoryCSV() {
+  const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
+  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"];
+  let csvContent = headers.join(",") + "\n";
+  
+  magentoInventoryData.forEach(item => {
+    const row = [
+      `"${item.RefNum || ""}"`,
+      `"${item.UPC || ""}"`,
+      `"${item.MFR || ""}"`,
+      `"${item.Style || ""}"`,
+      `"${item.Size || ""}"`,
+      item.Quantity || 0,
+      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
+      `"${item.QcFlaw || ""}"`,
+      `"${item.SerialNumber || ""}"`,
+      `"${item.Source || ""}"`
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+  
+  return csvContent;
+}
+
 // Month End finish/complete session endpoint
 app.post("/api/month-end/finish", async (req, res) => {
   try {
     const { sessionId } = req.body;
     
     console.log(`[Month End] Finish session received:`, { sessionId });
+
+    // Generate CSV exports
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const inventoryCSV = await generateMonthEndInventoryCSV();
+    const overstockCSV = await generateMonthEndOverstockCSV();
 
     // Clear the session data
     const currentSession = await getSession(sessionId);
@@ -1550,7 +1823,17 @@ app.post("/api/month-end/finish", async (req, res) => {
     
     res.json({
       success: true,
-      message: `Month End session ${sessionId} completed successfully!`
+      message: `Month End session ${sessionId} completed successfully!`,
+      csvExports: {
+        inventory: {
+          filename: `month-end-inventory-${timestamp}.csv`,
+          content: inventoryCSV
+        },
+        overstock: {
+          filename: `month-end-overstock-${timestamp}.csv`,
+          content: overstockCSV
+        }
+      }
     });
 
   } catch (err) {
@@ -1817,6 +2100,10 @@ app.post("/api/magento-inventory/finish", async (req, res) => {
     
     console.log(`[Magento Inventory] Finish session received:`, { sessionId });
 
+    // Generate CSV export
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const magentoCSV = await generateMagentoInventoryCSV();
+
     // Clear the session data
     const currentSession = await getSession(sessionId);
     if (currentSession) {
@@ -1829,7 +2116,11 @@ app.post("/api/magento-inventory/finish", async (req, res) => {
     
     res.json({
       success: true,
-      message: `Magento inventory session ${sessionId} completed successfully!`
+      message: `Magento inventory session ${sessionId} completed successfully!`,
+      csvExport: {
+        filename: `magento-inventory-${timestamp}.csv`,
+        content: magentoCSV
+      }
     });
 
   } catch (err) {

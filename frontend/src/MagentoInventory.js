@@ -345,16 +345,37 @@ function MagentoInventory() {
     }
   };
 
+  // Helper function to trigger CSV download
+  const downloadCSV = (content, filename) => {
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleFinishMagento = async () => {
     try {
       const res = await axios.post(`${apiUrl}/api/magento-inventory/finish`, {
         sessionId,
       });
       
+      // Handle automatic CSV download if provided
+      if (res.data.csvExport) {
+        downloadCSV(res.data.csvExport.content, res.data.csvExport.filename);
+        setMessage(res.data.message + " CSV file has been automatically downloaded.");
+      } else {
+        setMessage(res.data.message || "Magento inventory completed successfully.");
+      }
+      
       // Clear magento workflow state from localStorage
       clearMagentoWorkflowState();
       
-      setMessage(res.data.message || "Magento inventory completed successfully.");
       setScannedItems([]);
       setSku("");
       setShowManualRef(false);
@@ -679,7 +700,7 @@ function MagentoInventory() {
             <div className="mb-4">
               <h3 className="font-bold mb-2">Scanned Items:</h3>
               <div className="max-h-32 overflow-y-auto">
-                {scannedItems.map((item, index) => (
+                {scannedItems.slice().reverse().map((item, index) => (
                   <div key={index} className="text-sm mb-1">
                     <div className="font-medium">{item.description}</div>
                     <div className="text-xs opacity-70">

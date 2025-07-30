@@ -400,16 +400,42 @@ function MonthEndInventory() {
     }
   };
 
+  // Helper function to trigger CSV download
+  const downloadCSV = (content, filename) => {
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleFinishMonthEnd = async () => {
     try {
       const res = await axios.post(`${apiUrl}/api/month-end/finish`, {
         sessionId,
       });
       
+      // Handle automatic CSV downloads if provided
+      if (res.data.csvExports) {
+        if (res.data.csvExports.inventory) {
+          downloadCSV(res.data.csvExports.inventory.content, res.data.csvExports.inventory.filename);
+        }
+        if (res.data.csvExports.overstock) {
+          downloadCSV(res.data.csvExports.overstock.content, res.data.csvExports.overstock.filename);
+        }
+        setMessage(res.data.message + " CSV files have been automatically downloaded.");
+      } else {
+        setMessage(res.data.message || "Month End inventory completed successfully.");
+      }
+      
       // Clear month end workflow state from localStorage
       clearMonthEndWorkflowState();
       
-      setMessage(res.data.message || "Month End inventory completed successfully.");
       setScannedItems([]);
       setSku("");
       setShowManualRef(false);
@@ -766,7 +792,7 @@ function MonthEndInventory() {
                 Scanned Items ({scannedItems.reduce((total, item) => total + (item.quantity || 1), 0)} items)
               </h3>
               <div className="max-h-40 overflow-y-auto">
-                {scannedItems.map((item, index) => (
+                {scannedItems.slice().reverse().map((item, index) => (
                   <div key={index} className="text-sm mb-1">
                     {item.description}
                     {item.quantity && item.quantity > 1 ? ` (x${item.quantity})` : ""} 
