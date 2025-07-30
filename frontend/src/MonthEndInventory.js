@@ -434,6 +434,41 @@ function MonthEndInventory() {
     }
   };
 
+  // Function to clear all quantities in Month End collections
+  const handleClearAllQuantities = async () => {
+    // Show confirmation dialog
+    const confirmClear = window.confirm(
+      "Are you sure you want to clear all quantities in Month End Inventory and Overstock collections? This action cannot be undone."
+    );
+    
+    if (!confirmClear) {
+      return;
+    }
+
+    try {
+      setMessage("Clearing all quantities...");
+      
+      const res = await axios.post(`${apiUrl}/api/month-end/clear-quantities`);
+      
+      if (res.data.success) {
+        setMessage(
+          `${res.data.message}. Cleared ${res.data.totalItemsCleared} items total ` +
+          `(${res.data.inventoryItemsCleared} inventory, ${res.data.overstockItemsCleared} overstock).`
+        );
+        
+        // Refresh the data to show the cleared quantities
+        refreshMonthEndData();
+        
+        console.log("Month End quantities cleared successfully:", res.data);
+      } else {
+        setMessage("Failed to clear quantities. Please try again.");
+      }
+    } catch (err) {
+      setMessage(err.response?.data?.error || "Failed to clear all quantities.");
+      console.error("Error clearing quantities:", err);
+    }
+  };
+
   // Add undo function
   const handleUndo = async () => {
     try {
@@ -751,6 +786,16 @@ function MonthEndInventory() {
               </button>
             </div>
           )}
+
+          {/* Clear All Quantities Button */}
+          <div className="mb-4">
+            <button
+              onClick={handleClearAllQuantities}
+              className="btn btn-error w-full"
+            >
+              🗑️ Clear All Quantities
+            </button>
+          </div>
 
           <div className="mt-4">
             <a href="/" className="btn btn-outline w-full">

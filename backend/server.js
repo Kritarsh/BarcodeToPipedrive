@@ -1133,6 +1133,39 @@ app.get("/api/month-end-overstock/export-csv", async (req, res) => {
   }
 });
 
+// Month End clear all quantities endpoint
+app.post("/api/month-end/clear-quantities", async (req, res) => {
+  try {
+    console.log("Clear all quantities request received for Month End collections");
+    
+    // Clear quantities in Month End Inventory collection
+    const inventoryResult = await MonthEndInventory.updateMany(
+      {},
+      { $set: { Quantity: 0, Date: new Date() } }
+    );
+    
+    // Clear quantities in Month End Overstock collection
+    const overstockResult = await MonthEndOverstock.updateMany(
+      {},
+      { $set: { Quantity: 0, Date: new Date() } }
+    );
+    
+    console.log(`Cleared quantities for ${inventoryResult.modifiedCount} inventory items and ${overstockResult.modifiedCount} overstock items`);
+    
+    res.json({
+      success: true,
+      message: `Successfully cleared quantities for all Month End items`,
+      inventoryItemsCleared: inventoryResult.modifiedCount,
+      overstockItemsCleared: overstockResult.modifiedCount,
+      totalItemsCleared: inventoryResult.modifiedCount + overstockResult.modifiedCount
+    });
+    
+  } catch (err) {
+    console.error("Error clearing Month End quantities:", err);
+    res.status(500).json({ error: "Failed to clear Month End quantities" });
+  }
+});
+
 // Month End barcode scan handler
 app.post("/api/month-end/barcode", async (req, res) => {
   console.log("🔥 MONTH END BARCODE HANDLER HIT!", req.body);
@@ -1496,352 +1529,34 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
   });
 });
 
-// Month End new product handler
-app.post("/api/month-end/product/new", async (req, res) => {
-  const { barcode, description, size, price, qcFlaw, manualRef, sessionId, serialNumber, mfr, quantity = 1 } = req.body;
-  
-  // Allow null/empty barcode if manualRef is provided
-  if (!description || !sessionId || (!barcode && !manualRef)) {
-    return res.status(400).json({ error: "description, sessionId, and either barcode or manualRef are required" });
-  }
-
-  try {
-    // Determine which month end collection to use and save with increment logic (use appropriate primary key)
-    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
-    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
-    
-    // Calculate price using existing pricing logic or provided price
-    const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
-    
-    const newProduct = await monthEndCollection.findOneAndUpdate(
-      {
-        // Use RefNum as primary key if provided, otherwise use UPC (only if barcode exists)
-        ...(manualRef ? 
-          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr } :
-          barcode ? { UPC: barcode, Style: description, Size: size || "", MFR: mfr } :
-          { Style: description, Size: size || "", MFR: mfr } // No barcode case
-        )
-      },
-      {
-        $inc: { Quantity: quantity },
-        $setOnInsert: { 
-          ...(manualRef ? {} : { RefNum: "" }) // Only set RefNum to "" on insert when no manualRef
-        },
-        $set: { 
-          ...(barcode ? { UPC: barcode } : {}), // Only set UPC if barcode exists
-          Date: new Date(),
-          Price: calculatedPrice
-        }
-      },
-      {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true
-      }
-    );
-
-    // Two-way integration: Also add/update the product in regular inventory collection
-    if (barcode || manualRef) {
-      try {
-        const regularCollection = isInventoryItem ? Inventory : Overstock;
-        await regularCollection.findOneAndUpdate(
-          {
-            // Match by RefNum if available, otherwise by UPC, otherwise by description
-            ...(manualRef ? 
-              { RefNum: manualRef } :
-              barcode ? { UPC: barcode } :
-              { Style: description, Size: size || "", MFR: mfr }
-            )
-          },
-          {
-            $set: { 
-              RefNum: manualRef || "",
-              Style: description,
-              Size: size || "",
-              MFR: mfr || "",
-              ...(barcode ? { UPC: barcode } : {}),
-              Date: new Date(),
-              Price: calculatedPrice
-            }
-          },
-          {
-            upsert: true,
-            new: true
-          }
-        );
-        
-        console.log(`✅ Two-way integration: Added/updated product in regular ${isInventoryItem ? 'Inventory' : 'Overstock'} collection - RefNum: ${manualRef || 'N/A'}, UPC: ${barcode || 'N/A'}`);
-      } catch (error) {
-        console.error("Error updating regular inventory collection with new product:", error);
-        // Don't fail the request if this update fails - log and continue
-      }
-    }
-
-    const currentSession = await getSession(sessionId);
-    
-    // Clear pending state since we're successfully adding the product
-    if (currentSession.pendingState) {
-      delete currentSession.pendingState;
-    }
-    
-    if (!currentSession.skuEntries) currentSession.skuEntries = [];
-    currentSession.skuEntries.push({
-      description,
-      size: size || "",
-      qcFlaw: qcFlaw || "none",
-      serialNumber: serialNumber || "",
-      price: price || 0,
-      quantity: quantity, // Add quantity field
-      isManual: true,
-      upc: barcode || null, // Handle null barcode
-      refNum: manualRef || "", // Add manual reference for undo
-      collection: isInventoryItem ? "Inventory" : "Overstock", // Add collection for undo
-    });
-    await setSession(sessionId, currentSession);
-
-    return res.json({ message: "Product added to month end inventory!", product: newProduct });
-  } catch (err) {
-    console.error("Error adding new month end product:", err);
-    return res.status(500).json({ error: "Failed to add new month end product" });
-  }
-});
-
-// Month End finish handler
+// Month End finish/complete session endpoint
 app.post("/api/month-end/finish", async (req, res) => {
-  const { sessionId } = req.body;
-  
-  if (!sessionId) {
-    return res.status(400).json({ error: "sessionId is required" });
-  }
-
   try {
+    const { sessionId } = req.body;
+    
+    console.log(`[Month End] Finish session received:`, { sessionId });
+
+    // Clear the session data
     const currentSession = await getSession(sessionId);
-    
-    if (!currentSession || !currentSession.skuEntries || currentSession.skuEntries.length === 0) {
-      return res.status(400).json({ error: "No items found in the month end session." });
+    if (currentSession) {
+      await setSession(sessionId, {
+        noteContent: [],
+        prices: [],
+        skuEntries: [],
+        pendingState: null
+      });
+      console.log(`[Month End] Session ${sessionId} cleared`);
     }
-
-    // Items are already saved to Month End collections when scanned, so just clear the session
-    // Clear the session
-    await setSession(sessionId, {
-      noteContent: [],
-      prices: [],
-      skuEntries: [],
+    
+    res.json({
+      success: true,
+      message: `Month End session ${sessionId} completed successfully!`
     });
 
-    return res.json({ message: "Month end inventory completed successfully." });
-  } catch (error) {
-    console.error("Error in month end finish:", error);
-    return res.status(500).json({ error: "Failed to complete month end inventory" });
+  } catch (err) {
+    console.error(`[Month End] Error in finish endpoint:`, err);
+    res.status(500).json({ error: "Failed to complete Month End session" });
   }
-});
-
-// Price management endpoints
-app.get("/api/products/prices", async (req, res) => {
-  try {
-    const inventoryProducts = await Inventory.find({}, {
-      _id: 1,
-      RefNum: 1,
-      UPC: 1,
-      MFR: 1,
-      Style: 1,
-      Size: 1,
-      Price: 1
-    }).lean();
-
-    const overstockProducts = await Overstock.find({}, {
-      _id: 1,
-      RefNum: 1,
-      UPC: 1,
-      MFR: 1,
-      Style: 1,
-      Size: 1,
-      Price: 1
-    }).lean();
-
-    const monthEndInventoryProducts = await MonthEndInventory.find({}, {
-      _id: 1,
-      RefNum: 1,
-      UPC: 1,
-      MFR: 1,
-      Style: 1,
-      Size: 1,
-      Price: 1
-    }).lean();
-
-    const monthEndOverstockProducts = await MonthEndOverstock.find({}, {
-      _id: 1,
-      RefNum: 1,
-      UPC: 1,
-      MFR: 1,
-      Style: 1,
-      Size: 1,
-      Price: 1
-    }).lean();
-
-    // Add collection type to each product
-    const inventoryWithType = inventoryProducts.map(p => ({ ...p, collection: 'Inventory' }));
-    const overstockWithType = overstockProducts.map(p => ({ ...p, collection: 'Overstock' }));
-    const monthEndInventoryWithType = monthEndInventoryProducts.map(p => ({ ...p, collection: 'MonthEndInventory' }));
-    const monthEndOverstockWithType = monthEndOverstockProducts.map(p => ({ ...p, collection: 'MonthEndOverstock' }));
-
-    const allProducts = [...inventoryWithType, ...overstockWithType, ...monthEndInventoryWithType, ...monthEndOverstockWithType];
-    res.json(allProducts);
-  } catch (error) {
-    console.error("Error fetching products for price management:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.put("/api/products/:collection/:id/price", async (req, res) => {
-  try {
-    const { collection, id } = req.params;
-    const { price } = req.body;
-
-    if (!price && price !== 0) {
-      return res.status(400).json({ error: "Price is required" });
-    }
-
-    const numericPrice = parseFloat(price);
-    if (isNaN(numericPrice) || numericPrice < 0) {
-      return res.status(400).json({ error: "Price must be a valid non-negative number" });
-    }
-
-    let model;
-    if (collection === 'Inventory') {
-      model = Inventory;
-    } else if (collection === 'Overstock') {
-      model = Overstock;
-    } else if (collection === 'MonthEndInventory') {
-      model = MonthEndInventory;
-    } else if (collection === 'MonthEndOverstock') {
-      model = MonthEndOverstock;
-    } else {
-      return res.status(400).json({ error: "Invalid collection" });
-    }
-
-    const updatedProduct = await model.findByIdAndUpdate(
-      id,
-      { Price: numericPrice },
-      { new: true }
-    );
-
-    if (!updatedProduct) {
-      return res.status(404).json({ error: "Product not found" });
-    }
-
-    // Also update corresponding collections if they exist (only for regular collections)
-    if (collection === 'Inventory' || collection === 'Overstock') {
-      const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
-      await monthEndModel.updateMany(
-        { RefNum: updatedProduct.RefNum },
-        { $set: { Price: numericPrice } }
-      );
-    }
-
-    res.json({ 
-      message: "Price updated successfully",
-      product: updatedProduct
-    });
-  } catch (error) {
-    console.error("Error updating product price:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// General product update endpoint for all fields
-app.put("/api/products/:collection/:id", async (req, res) => {
-  try {
-    console.log("PUT request received for:", req.params.collection, req.params.id);
-    console.log("Request body:", req.body);
-    
-    const { collection, id } = req.params;
-    const updates = req.body;
-
-    // Validate collection
-    let model;
-    if (collection === 'Inventory') {
-      model = Inventory;
-    } else if (collection === 'Overstock') {
-      model = Overstock;
-    } else if (collection === 'MonthEndInventory') {
-      model = MonthEndInventory;
-    } else if (collection === 'MonthEndOverstock') {
-      model = MonthEndOverstock;
-    } else {
-      return res.status(400).json({ error: "Invalid collection" });
-    }
-
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Invalid product ID" });
-    }
-
-    // Build update object with proper field mappings
-    const updateObj = {};
-    
-    if (updates.refNum !== undefined) updateObj.RefNum = updates.refNum;
-    if (updates.upc !== undefined) updateObj.UPC = updates.upc;
-    if (updates.mfr !== undefined) updateObj.MFR = updates.mfr;
-    if (updates.style !== undefined) updateObj.Style = updates.style;
-    if (updates.size !== undefined) updateObj.Size = updates.size;
-    if (updates.price !== undefined) {
-      const numericPrice = parseFloat(updates.price);
-      if (isNaN(numericPrice) || numericPrice < 0) {
-        return res.status(400).json({ error: "Price must be a valid non-negative number" });
-      }
-      updateObj.Price = numericPrice;
-    }
-
-    if (Object.keys(updateObj).length === 0) {
-      return res.status(400).json({ error: "No valid fields to update" });
-    }
-
-    const updatedProduct = await model.findByIdAndUpdate(
-      id,
-      updateObj,
-      { new: true }
-    );
-
-    if (!updatedProduct) {
-      return res.status(404).json({ error: "Product not found" });
-    }
-
-    // Also update corresponding Month End collections if they exist
-    const monthEndModel = collection === 'Inventory' ? MonthEndInventory : MonthEndOverstock;
-    const monthEndUpdates = {};
-    
-    // Only update Month End collections with fields that exist there
-    if (updateObj.RefNum !== undefined) monthEndUpdates.RefNum = updateObj.RefNum;
-    if (updateObj.UPC !== undefined) monthEndUpdates.UPC = updateObj.UPC;
-    if (updateObj.MFR !== undefined) monthEndUpdates.MFR = updateObj.MFR;
-    if (updateObj.Style !== undefined) monthEndUpdates.Style = updateObj.Style;
-    if (updateObj.Size !== undefined) monthEndUpdates.Size = updateObj.Size;
-    if (updateObj.Price !== undefined) monthEndUpdates.Price = updateObj.Price;
-
-    if (Object.keys(monthEndUpdates).length > 0) {
-      await monthEndModel.updateMany(
-        { RefNum: updatedProduct.RefNum },
-        { $set: monthEndUpdates }
-      );
-    }
-
-    res.json({ 
-      message: "Product updated successfully",
-      product: updatedProduct
-    });
-  } catch (error) {
-    console.error("Error updating product:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Serve static files from React build
-app.use(express.static(path.join(__dirname, '../frontend/build')));
-
-// More specific catch-all that avoids API routes
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
 // --- Start Server ---
