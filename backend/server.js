@@ -726,24 +726,38 @@ app.post("/api/barcode/undo", async (req, res) => {
     const undoneItem = currentSession.skuEntries[currentSession.skuEntries.length - 1];
     
     // Try to decrement quantity in the database if the item has collection/UPC info
-    if (undoneItem.collection && undoneItem.upc) {
+    if (undoneItem.collection && (undoneItem.upc || undoneItem.refNum)) {
       try {
         const monthEndCollection = undoneItem.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
         
-        // Find the document and decrement quantity by 1
-        const doc = await monthEndCollection.findOne({ UPC: undoneItem.upc });
-        if (doc && doc.Quantity > 0) {
-          const newQuantity = Math.max(0, doc.Quantity - 1);
-          await monthEndCollection.findOneAndUpdate(
-            { UPC: undoneItem.upc },
-            {
-              $set: {
-                Quantity: newQuantity,
-                Date: new Date()
+        // Build the find query - prefer UPC if available, otherwise use RefNum
+        let findQuery;
+        if (undoneItem.upc && undoneItem.upc.trim() !== '') {
+          findQuery = { UPC: undoneItem.upc };
+        } else if (undoneItem.refNum && undoneItem.refNum.trim() !== '') {
+          findQuery = { RefNum: undoneItem.refNum };
+        } else {
+          console.log("[Undo] No valid UPC or RefNum found for undo operation - skipping database update");
+        }
+        
+        // Only attempt database operation if we have a valid find query
+        if (findQuery) {
+          // Find the document and decrement quantity by the actual scanned quantity
+          const quantityToRemove = undoneItem.quantity || 1;
+          const doc = await monthEndCollection.findOne(findQuery);
+          if (doc && doc.Quantity > 0) {
+            const newQuantity = Math.max(0, doc.Quantity - quantityToRemove);
+            await monthEndCollection.findOneAndUpdate(
+              findQuery,
+              {
+                $set: {
+                  Quantity: newQuantity,
+                  Date: new Date()
+                }
               }
-            }
-          );
-          console.log(`[Undo] Decremented quantity to ${newQuantity} for UPC: ${undoneItem.upc}`);
+            );
+            console.log(`[Undo] Decremented quantity by ${quantityToRemove} to ${newQuantity} for ${Object.keys(findQuery)[0]}: ${Object.values(findQuery)[0]}`);
+          }
         }
       } catch (dbError) {
         console.error("Error decrementing database quantity:", dbError);
@@ -1173,6 +1187,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
           isMachine: true,
           upc: barcode, // This is the serial number when machineType is provided
           name: machineName,
+          collection: "Overstock", // Add collection for undo (machines go to Overstock)
         });
 
         // Save machine immediately to Month End Overstock - increment if exists
@@ -1184,7 +1199,7 @@ app.post("/api/month-end/barcode", async (req, res) => {
             MFR: "Machine"
           },
           {
-            $inc: { Quantity: 1 },
+            $inc: { Quantity: quantity },
             $set: { 
               RefNum: "",
               Date: new Date(),
@@ -1375,6 +1390,9 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       serialNumber: serialNumber || "",
       price: calculatedPrice,
       quantity: quantity, // Add quantity to manual reference entry
+      collection: matchResult.collection, // Add collection for undo
+      upc: barcode || "", // Add UPC for undo (may be empty)
+      refNum: manualRef, // Add manual reference for undo
     });
 
     // Save immediately to Month End collection based on original collection - increment if exists (RefNum as primary key)
@@ -1576,6 +1594,8 @@ app.post("/api/month-end/product/new", async (req, res) => {
       quantity: quantity, // Add quantity field
       isManual: true,
       upc: barcode || null, // Handle null barcode
+      refNum: manualRef || "", // Add manual reference for undo
+      collection: isInventoryItem ? "Inventory" : "Overstock", // Add collection for undo
     });
     await setSession(sessionId, currentSession);
 
