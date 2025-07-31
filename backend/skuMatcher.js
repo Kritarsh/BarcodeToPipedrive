@@ -323,8 +323,8 @@ export async function matchSkuWithMagentoInventory(barcode) {
       row: magentoMatch,
       matchedColumn: "UPC",
       score: 1,
-      brand: magentoMatch.MFR || null,
-      model: magentoMatch.Style || null,
+      brand: magentoMatch.Manufacturer || null,
+      model: magentoMatch.Name || null,
       foundInMongoDB: true,
     };
   }

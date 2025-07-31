@@ -151,6 +151,20 @@ function qcFlawLabel(value) {
   }
 }
 
+// Function to generate unique ID for MagentoInventory items
+async function generateMagentoInventoryID() {
+  try {
+    // Find the highest existing ID
+    const lastItem = await MagentoInventory.findOne().sort({ ID: -1 });
+    const nextID = lastItem && lastItem.ID ? lastItem.ID + 1 : 1;
+    return nextID;
+  } catch (error) {
+    console.error("Error generating MagentoInventory ID:", error);
+    // Fallback to timestamp-based ID if there's an error
+    return Date.now();
+  }
+}
+
 // --- Routes ---
 
 // Session restoration endpoint to sync frontend localStorage with backend session
@@ -1103,7 +1117,7 @@ app.get("/api/magento-inventory/export-csv", async (req, res) => {
     console.log("Found documents for export:", magentoInventoryData.length);
     
     // Define CSV headers
-    const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"];
+    const headers = ["ID", "Name", "RefNum", "UPC", "Manufacturer", "size", "Quantity", "Price", "Websites", "Date", "QcFlaw", "SerialNumber", "Source"];
     
     // Convert data to CSV format
     let csvContent = headers.join(",") + "\n";
@@ -1113,13 +1127,15 @@ app.get("/api/magento-inventory/export-csv", async (req, res) => {
     } else {
       magentoInventoryData.forEach(item => {
         const row = [
+          item.ID || "",
+          `"${item.Name || ""}"`,
           `"${item.RefNum || ""}"`,
           `"${item.UPC || ""}"`,
-          `"${item.MFR || ""}"`,
-          `"${item.Style || ""}"`,
-          `"${item.Size || ""}"`,
+          `"${item.Manufacturer || ""}"`,
+          `"${item.size || ""}"`,
           item.Quantity || 0,
           item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+          `"${item.Websites || ""}"`,
           `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
           `"${item.QcFlaw || ""}"`,
           `"${item.SerialNumber || ""}"`,
@@ -1774,18 +1790,20 @@ async function generateMonthEndOverstockCSV() {
 // Helper function to generate CSV content for Magento Inventory
 async function generateMagentoInventoryCSV() {
   const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
-  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date", "QcFlaw", "SerialNumber", "Source"];
+  const headers = ["ID", "Name", "RefNum", "UPC", "Manufacturer", "size", "Quantity", "Price", "Websites", "Date", "QcFlaw", "SerialNumber", "Source"];
   let csvContent = headers.join(",") + "\n";
   
   magentoInventoryData.forEach(item => {
     const row = [
+      item.ID || "",
+      `"${item.Name || ""}"`,
       `"${item.RefNum || ""}"`,
       `"${item.UPC || ""}"`,
-      `"${item.MFR || ""}"`,
-      `"${item.Style || ""}"`,
-      `"${item.Size || ""}"`,
+      `"${item.Manufacturer || ""}"`,
+      `"${item.size || ""}"`,
       item.Quantity || 0,
       item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Websites || ""}"`,
       `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
       `"${item.QcFlaw || ""}"`,
       `"${item.SerialNumber || ""}"`,
@@ -1910,8 +1928,8 @@ app.post("/api/magento-inventory/barcode", async (req, res) => {
     currentSession.scannedItems.push({
       upc: barcode,
       refNum: matchResult.row.RefNum || "",
-      description: matchResult.row.Style || "",
-      size: matchResult.row.Size || "",
+      description: matchResult.row.Name || "",
+      size: matchResult.row.size || "",
       price: calculatedPrice,
       quantity: quantity || 1,
       qcFlaw: qcFlaw || "none",
@@ -1997,8 +2015,8 @@ app.post("/api/magento-inventory/barcode/manual", async (req, res) => {
     currentSession.scannedItems.push({
       upc: barcode || "",
       refNum: manualRef,
-      description: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
-      size: matchResult.row.Size || "",
+      description: matchResult.row.Name || "",
+      size: matchResult.row.size || "",
       price: calculatedPrice,
       quantity: quantity || 1,
       qcFlaw: qcFlaw || "none",
@@ -2037,15 +2055,20 @@ app.post("/api/magento-inventory/new-product", async (req, res) => {
       return res.status(400).json({ error: "Product reference number is required" });
     }
 
+    // Generate unique ID for the new product
+    const newID = await generateMagentoInventoryID();
+
     // Save the new product to MagentoInventory collection
     const magentoInventoryItem = new MagentoInventory({
+      ID: newID,
+      Name: product.name || "",
       RefNum: product.refNum,
       UPC: product.barcode || "",
-      MFR: product.manufacturer || "",
-      Style: product.name || "",
-      Size: product.size || "",
+      Manufacturer: product.manufacturer || "",
+      size: product.size || "",
       Quantity: parseInt(product.quantity) || 1,
       Price: parseFloat(product.price) || 0,
+      Websites: "Main Website", // Always set to "Main Website" for new products
       Date: new Date(),
       QcFlaw: product.qcFlaw || "none",
       SerialNumber: product.serialNumber || "",
