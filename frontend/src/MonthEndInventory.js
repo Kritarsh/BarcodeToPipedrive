@@ -739,13 +739,12 @@ function MonthEndInventory() {
               <input
                 type="number"
                 step="0.01"
-                placeholder="Price"
+                placeholder="Price (optional)"
                 className="input input-bordered w-full mb-2"
                 value={newProduct.price}
                 onChange={(e) =>
                   setNewProduct({ ...newProduct, price: e.target.value })
                 }
-                required
               />
               
               {/* Manufacturer Dropdown */}
