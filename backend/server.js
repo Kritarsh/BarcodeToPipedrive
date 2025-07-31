@@ -1787,6 +1787,34 @@ async function generateMonthEndOverstockCSV() {
   return csvContent;
 }
 
+// Helper function to generate CSV content for Magento Inventory
+async function generateMagentoInventoryCSV() {
+  const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
+  const headers = ["ID", "Name", "RefNum", "UPC", "Manufacturer", "size", "Quantity", "Price", "Websites", "Date", "QcFlaw", "SerialNumber", "Source"];
+  let csvContent = headers.join(",") + "\n";
+  
+  magentoInventoryData.forEach(item => {
+    const row = [
+      item.ID || "",
+      `"${item.Name || ""}"`,
+      `"${item.RefNum || ""}"`,
+      `"${item.UPC || ""}"`,
+      `"${item.Manufacturer || ""}"`,
+      `"${item.size || ""}"`,
+      item.Quantity || 0,
+      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Websites || ""}"`,
+      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
+      `"${item.QcFlaw || ""}"`,
+      `"${item.SerialNumber || ""}"`,
+      `"${item.Source || ""}"`
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+  
+  return csvContent;
+}
+
 // Month End finish/complete session endpoint
 app.post("/api/month-end/finish", async (req, res) => {
   try {
@@ -2278,27 +2306,6 @@ app.post("/api/magento-inventory/undo", async (req, res) => {
     res.status(500).json({ error: "Failed to undo last scan" });
   }
 });
-
-// Helper function to generate unique ID for MagentoInventory products
-async function generateMagentoInventoryID() {
-  const existingProducts = await MagentoInventory.find().sort({ ID: -1 }).limit(1);
-  let newID = 1;
-  if (existingProducts.length > 0 && existingProducts[0].ID) {
-    newID = parseInt(existingProducts[0].ID) + 1;
-  }
-  return newID.toString();
-}
-
-// Helper function for QC flaw labels
-function qcFlawLabel(qcFlaw) {
-  const labels = {
-    "missing-items": "Missing Items",
-    "damaged-box": "Damaged Box", 
-    "used": "Used",
-    "none": "None"
-  };
-  return labels[qcFlaw] || qcFlaw;
-}
 
 // --- Start Server ---
 const PORT = process.env.PORT || 5000;
