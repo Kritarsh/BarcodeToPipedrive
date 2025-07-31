@@ -1787,34 +1787,6 @@ async function generateMonthEndOverstockCSV() {
   return csvContent;
 }
 
-// Helper function to generate CSV content for Magento Inventory
-async function generateMagentoInventoryCSV() {
-  const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
-  const headers = ["ID", "Name", "RefNum", "UPC", "Manufacturer", "size", "Quantity", "Price", "Websites", "Date", "QcFlaw", "SerialNumber", "Source"];
-  let csvContent = headers.join(",") + "\n";
-  
-  magentoInventoryData.forEach(item => {
-    const row = [
-      item.ID || "",
-      `"${item.Name || ""}"`,
-      `"${item.RefNum || ""}"`,
-      `"${item.UPC || ""}"`,
-      `"${item.Manufacturer || ""}"`,
-      `"${item.size || ""}"`,
-      item.Quantity || 0,
-      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
-      `"${item.Websites || ""}"`,
-      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
-      `"${item.QcFlaw || ""}"`,
-      `"${item.SerialNumber || ""}"`,
-      `"${item.Source || ""}"`
-    ];
-    csvContent += row.join(",") + "\n";
-  });
-  
-  return csvContent;
-}
-
 // Month End finish/complete session endpoint
 app.post("/api/month-end/finish", async (req, res) => {
   try {
@@ -1860,10 +1832,59 @@ app.post("/api/month-end/finish", async (req, res) => {
   }
 });
 
-// --- Start Server ---
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Magento Inventory session restore endpoint
+app.post("/api/magento-inventory/session/restore", async (req, res) => {
+  try {
+    const { sessionId, scannedItems, totalPrice } = req.body;
+    
+    console.log("🔄 MAGENTO INVENTORY SESSION RESTORE:", { sessionId, itemCount: scannedItems?.length, totalPrice });
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId is required" });
+    }
+
+    // Restore the session with the provided data
+    const restoredSession = {
+      scannedItems: [],
+      totalPrice: totalPrice || 0
+    };
+
+    // Rebuild scannedItems from frontend localStorage state
+    if (scannedItems && scannedItems.length > 0) {
+      console.log("📦 Processing", scannedItems.length, "scanned items for Magento Inventory restoration");
+      
+      restoredSession.scannedItems = scannedItems.map(item => ({
+        upc: item.sku || "",
+        refNum: item.refNum || "",
+        description: item.description || "",
+        size: item.size || "",
+        price: item.price || 0,
+        quantity: item.quantity || 1,
+        qcFlaw: item.qcFlaw || "none",
+        serialNumber: item.serialNumber || "",
+        timestamp: new Date(item.timestamp) || new Date(),
+        source: item.source || "restored"
+      }));
+    }
+
+    console.log("💾 Saving restored Magento Inventory session:", {
+      sessionId,
+      scannedItemsCount: restoredSession.scannedItems.length,
+      totalPrice: restoredSession.totalPrice
+    });
+
+    await setSession(sessionId, restoredSession);
+
+    return res.json({ 
+      message: "Magento Inventory session restored successfully",
+      sessionId,
+      itemCount: scannedItems ? scannedItems.length : 0,
+      totalPrice: restoredSession.totalPrice
+    });
+  } catch (error) {
+    console.error("❌ Error restoring Magento Inventory session:", error);
+    return res.status(500).json({ error: "Failed to restore Magento Inventory session" });
+  }
 });
 
 // Magento Inventory barcode scanning endpoint
@@ -2211,7 +2232,9 @@ app.post("/api/magento-inventory/undo", async (req, res) => {
         const existingDoc = await MagentoInventory.findOne(findQuery);
         
         if (existingDoc) {
-          const newQuantity = Math.max(0, (existingDoc.Quantity || 0) - 1);
+          // Decrement by the actual scanned quantity, not just 1
+          const quantityToRemove = lastItem.quantity || 1;
+          const newQuantity = Math.max(0, (existingDoc.Quantity || 0) - quantityToRemove);
           
           // Always just decrement quantity, never remove the document
           await MagentoInventory.findOneAndUpdate(
@@ -2223,7 +2246,7 @@ app.post("/api/magento-inventory/undo", async (req, res) => {
               }
             }
           );
-          console.log(`[Magento Inventory] Reduced quantity to ${newQuantity} for:`, findQuery);
+          console.log(`[Magento Inventory] Reduced quantity by ${quantityToRemove} to ${newQuantity} for:`, findQuery);
         }
       } catch (dbError) {
         console.error(`[Magento Inventory] Error reversing database operation:`, dbError);
@@ -2254,4 +2277,31 @@ app.post("/api/magento-inventory/undo", async (req, res) => {
     console.error(`[Magento Inventory] Error in undo endpoint:`, err);
     res.status(500).json({ error: "Failed to undo last scan" });
   }
+});
+
+// Helper function to generate unique ID for MagentoInventory products
+async function generateMagentoInventoryID() {
+  const existingProducts = await MagentoInventory.find().sort({ ID: -1 }).limit(1);
+  let newID = 1;
+  if (existingProducts.length > 0 && existingProducts[0].ID) {
+    newID = parseInt(existingProducts[0].ID) + 1;
+  }
+  return newID.toString();
+}
+
+// Helper function for QC flaw labels
+function qcFlawLabel(qcFlaw) {
+  const labels = {
+    "missing-items": "Missing Items",
+    "damaged-box": "Damaged Box", 
+    "used": "Used",
+    "none": "None"
+  };
+  return labels[qcFlaw] || qcFlaw;
+}
+
+// --- Start Server ---
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

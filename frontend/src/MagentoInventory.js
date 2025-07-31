@@ -7,8 +7,15 @@ const apiUrl = process.env.REACT_APP_API_URL;
 
 function MagentoInventory() {
   const [sessionId] = useState(() => {
-    const id = Math.random().toString(36).substr(2, 9);
-    console.log(`[Magento Inventory Session Start] New session ID created: ${id}`);
+    // Get persistent sessionId from localStorage or create new one
+    let id = localStorage.getItem('magento_sessionId');
+    if (!id) {
+      id = Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('magento_sessionId', id);
+      console.log(`[Magento Inventory Session Start] New session ID created: ${id}`);
+    } else {
+      console.log(`[Magento Inventory Session Start] Restored session ID: ${id}`);
+    }
     return id;
   });
   
@@ -144,6 +151,25 @@ function MagentoInventory() {
     localStorage.setItem('magento_quantity', quantity.toString());
   }, [quantity]);
 
+  // Function to restore session state to backend on component mount
+  const restoreSession = async () => {
+    if (scannedItems.length > 0) {
+      try {
+        console.log(`[Magento Inventory] Restoring session with ${scannedItems.length} items`);
+        const res = await axios.post(`${apiUrl}/api/magento-inventory/session/restore`, {
+          sessionId,
+          scannedItems,
+          totalPrice
+        });
+        console.log(`[Magento Inventory] Session restored successfully:`, res.data);
+      } catch (error) {
+        console.error("Error restoring Magento Inventory session:", error);
+        // Don't fail silently - let user know there might be undo issues
+        setMessage("Session restored with limited undo capability. Please refresh if undo doesn't work properly.");
+      }
+    }
+  };
+
   // Function to refresh magento inventory data
   const refreshMagentoData = async () => {
     try {
@@ -177,10 +203,17 @@ function MagentoInventory() {
     };
   }, []);
 
-  // Fetch Magento Inventory data on component mount
+  // Fetch Magento Inventory data on component mount and restore session
   useEffect(() => {
     refreshMagentoData();
   }, []);
+
+  // Restore session after scannedItems are loaded from localStorage
+  useEffect(() => {
+    if (scannedItems.length > 0) {
+      restoreSession();
+    }
+  }, []); // Only run once on mount, after localStorage is loaded
 
   const handleSkuSubmit = async (e) => {
     e.preventDefault();
@@ -464,7 +497,8 @@ function MagentoInventory() {
       'magento_showNewProductForm',
       'magento_newProduct',
       'magento_scannedItems',
-      'magento_quantity'
+      'magento_quantity',
+      'magento_sessionId' // Clear the session ID as well
     ];
     
     keysToRemove.forEach(key => {
@@ -519,27 +553,15 @@ function MagentoInventory() {
       if (res.data.undoneItem && scannedItems.length > 0) {
         const lastItem = scannedItems[scannedItems.length - 1];
         
-        // Always decrement quantity by 1, remove item only if quantity becomes 0
-        if (lastItem.quantity > 1) {
-          // Decrement quantity of the last item
-          setScannedItems((prev) => {
-            const updated = [...prev];
-            updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              quantity: updated[updated.length - 1].quantity - 1
-            };
-            return updated;
-          });
-        } else {
-          // Remove the last item if quantity is 1 (becomes 0)
-          setScannedItems((prev) => prev.slice(0, -1));
-        }
+        // Remove the entire last item (like Month End Inventory)
+        setScannedItems((prev) => prev.slice(0, -1));
         
-        // Update total price (subtract the price of 1 item)
+        // Update total price (subtract the full price × quantity of the undone item)
         if (res.data.newTotalPrice !== undefined) {
           setTotalPrice(res.data.newTotalPrice);
         } else if (res.data.undoneItem.price) {
-          setTotalPrice((prev) => Math.max(0, prev - res.data.undoneItem.price));
+          const undoneItemTotalPrice = res.data.undoneItem.price * (res.data.undoneItem.quantity || 1);
+          setTotalPrice((prev) => Math.max(0, prev - undoneItemTotalPrice));
         }
       }
 

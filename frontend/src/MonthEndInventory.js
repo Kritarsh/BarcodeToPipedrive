@@ -7,8 +7,15 @@ const apiUrl = process.env.REACT_APP_API_URL;
 
 function MonthEndInventory() {
   const [sessionId] = useState(() => {
-    const id = Math.random().toString(36).substr(2, 9);
-    console.log(`[Month End Session Start] New session ID created: ${id}`);
+    // Get persistent sessionId from localStorage or create new one
+    let id = localStorage.getItem('monthEnd_sessionId');
+    if (!id) {
+      id = Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('monthEnd_sessionId', id);
+      console.log(`[Month End Session Start] New session ID created: ${id}`);
+    } else {
+      console.log(`[Month End Session Start] Restored session ID: ${id}`);
+    }
     return id;
   });
   // Load month end workflow state from localStorage or use default values
@@ -645,7 +652,8 @@ function MonthEndInventory() {
       'monthEnd_showNewProductForm',
       'monthEnd_newProduct',
       'monthEnd_scannedItems',
-      'monthEnd_quantity'
+      'monthEnd_quantity',
+      'monthEnd_sessionId' // Clear the session ID as well
     ];
     
     keysToRemove.forEach(key => {
