@@ -1666,7 +1666,23 @@ app.post("/api/month-end/product/new", async (req, res) => {
     // Calculate price using existing pricing logic or provided price
     const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
     
-    // Save directly to Month End collection (this is the key difference from regular new product)
+    // First, save to regular inventory collection (Inventory or Overstock)
+    const regularCollection = isInventoryItem ? Inventory : Overstock;
+    const regularProduct = new regularCollection({
+      RefNum: manualRef || "",
+      ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
+      Style: description,
+      Size: size || "",
+      MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown"),
+      Quantity: 0, // Start with 0 in regular inventory
+      Date: new Date(),
+      Price: calculatedPrice,
+    });
+    
+    await regularProduct.save();
+    console.log(`[Month End] New product saved to regular ${isInventoryItem ? "Inventory" : "Overstock"}:`, regularProduct);
+    
+    // Also save to Month End collection and increment quantity
     const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
     const monthEndProduct = await monthEndCollection.findOneAndUpdate(
       {
@@ -1731,8 +1747,9 @@ app.post("/api/month-end/product/new", async (req, res) => {
     console.log(`[Month End] New product added to ${isInventoryItem ? "MonthEndInventory" : "MonthEndOverstock"}:`, monthEndProduct);
 
     return res.json({ 
-      message: "Product added to month end inventory successfully!", 
-      product: monthEndProduct,
+      message: "Product added to both regular inventory and month end inventory successfully!", 
+      regularProduct: regularProduct,
+      monthEndProduct: monthEndProduct,
       price: calculatedPrice
     });
   } catch (err) {
