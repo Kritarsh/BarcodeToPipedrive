@@ -182,7 +182,10 @@ export async function matchSkuWithDatabase(barcode) {
 }
 
 export async function matchSkuWithDatabaseManual(barcode, manualRef) {
-  const inventoryMatch = await Inventory.findOne({ "RefNum": manualRef });
+  // Case-insensitive search using regex
+  const refRegex = new RegExp(`^${manualRef}$`, 'i');
+  
+  const inventoryMatch = await Inventory.findOne({ "RefNum": refRegex });
   if (inventoryMatch) {
     return {
       match: true,
@@ -194,7 +197,7 @@ export async function matchSkuWithDatabaseManual(barcode, manualRef) {
     };
   }
 
-  const overstockMatch = await Overstock.findOne({ "RefNum": manualRef });
+  const overstockMatch = await Overstock.findOne({ "RefNum": refRegex });
   if (overstockMatch) {
     return {
       match: true,
