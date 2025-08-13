@@ -62,12 +62,12 @@ function App() {
   const [inventoryData, setInventoryData] = useState([]);
   const [overstockData, setOverstockData] = useState([]);
   const [machineSpecificsData, setMachineSpecificsData] = useState([]);
-  const [selectedCollection, setSelectedCollection] = useState("inventory");
+  const [selectedCollection, setSelectedCollection] = useState("merged");
 
   // Computed variables for table display
-  const tableData = selectedCollection === "inventory" ? inventoryData : 
-                   selectedCollection === "overstock" ? overstockData : 
-                   machineSpecificsData;
+  const tableData = selectedCollection === "merged" ? inventoryData : 
+                   selectedCollection === "machine-specifics" ? machineSpecificsData : 
+                   [];
 
   const currentFieldOrder = tableData.length > 0 ? Object.keys(tableData[0]) : [];
 
@@ -98,13 +98,15 @@ function App() {
   // Fetch MongoDB data
   useEffect(() => {
     axios
-      .get(`${apiUrl}/api/inventory`)
-      .then((res) => setInventoryData(res.data.data))
-      .catch(() => setInventoryData([]));
-    axios
-      .get(`${apiUrl}/api/overstock`)
-     .then((res) => setOverstockData(res.data.data))
-      .catch(() => setOverstockData([]));
+      .get(`${apiUrl}/api/merged`)
+      .then((res) => {
+        setInventoryData(res.data.data);
+        setOverstockData([]); // Clear overstock data since we're using merged
+      })
+      .catch(() => {
+        setInventoryData([]);
+        setOverstockData([]);
+      });
     axios
       .get(`${apiUrl}/api/machine-specifics`)
       .then((res) => setMachineSpecificsData(res.data.data))
@@ -670,10 +672,7 @@ function App() {
         manualRef: newProduct.manualRef,
         size: newProduct.size || "",
         isNew: true,
-        collection: (() => {
-          const mfr = newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr;
-          return mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock";
-        })(),
+        collection: "merged", // Always use merged collection
         timestamp: new Date().toISOString(),
       };
       setScannedItems(prev => [...prev, newItem]);
@@ -741,10 +740,7 @@ function App() {
             manualRef: newProduct.manualRef,
             size: newProduct.size || "",
             isNew: true,
-            collection: (() => {
-              const mfr = newProduct.mfr === "Other" ? newProduct.customMfr : newProduct.mfr;
-              return mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS") ? "Inventory" : "Overstock";
-            })(),
+            collection: "merged", // Always use merged collection
             timestamp: new Date().toISOString(),
           };
           setScannedItems(prev => [...prev, newItem]);

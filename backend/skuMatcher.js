@@ -4,8 +4,7 @@ import stringSimilarity from "string-similarity";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import Inventory from "./models/Inventory.js";
-import Overstock from "./models/Overstock.js";
+import Merged from "./models/Merged.js";
 import MachineSpecific from "./models/MachineSpecific.js";
 import MagentoInventory from "./models/MagentoInventory.js";
 
@@ -121,32 +120,17 @@ export function getPriceForName(name, flaw) {
 }
 export async function matchSkuWithDatabase(barcode) {
   // 1. Check MongoDB collections first
-  const inventoryMatch = await Inventory.findOne({ UPC: barcode });
-  if (inventoryMatch) {
-    console.log("Found exact match in Inventory collection");
+  const mergedMatch = await Merged.findOne({ UPC: barcode });
+  if (mergedMatch) {
+    console.log("Found exact match in Merged collection");
     return {
       match: true,
-      collection: "Inventory",
-      row: inventoryMatch,
+      collection: "Merged",
+      row: mergedMatch,
       matchedColumn: "UPC",
       score: 1,
-      brand: inventoryMatch.MFR || null,
-      model: inventoryMatch.Style || null,
-      foundInMongoDB: true,
-    };
-  }
-
-  const overstockMatch = await Overstock.findOne({ UPC: barcode });
-  if (overstockMatch) {
-    console.log("Found exact match in Overstock collection");
-    return {
-      match: true,
-      collection: "Overstock",
-      row: overstockMatch,
-      matchedColumn: "UPC",
-      score: 1,
-      brand: overstockMatch.MFR || null,
-      model: overstockMatch.Style || null,
+      brand: mergedMatch.MFR || null,
+      model: mergedMatch.Style || null,
       foundInMongoDB: true,
     };
   }
@@ -185,24 +169,12 @@ export async function matchSkuWithDatabaseManual(barcode, manualRef) {
   // Case-insensitive search using regex
   const refRegex = new RegExp(`^${manualRef}$`, 'i');
   
-  const inventoryMatch = await Inventory.findOne({ "RefNum": refRegex });
-  if (inventoryMatch) {
+  const mergedMatch = await Merged.findOne({ "RefNum": refRegex });
+  if (mergedMatch) {
     return {
       match: true,
-      collection: "Inventory",
-      row: inventoryMatch,
-      matchedColumn: "RefNum",
-      score: 1,
-      manualRef,
-    };
-  }
-
-  const overstockMatch = await Overstock.findOne({ "RefNum": refRegex });
-  if (overstockMatch) {
-    return {
-      match: true,
-      collection: "Overstock",
-      row: overstockMatch,
+      collection: "Merged",
+      row: mergedMatch,
       matchedColumn: "RefNum",
       score: 1,
       manualRef,
@@ -224,10 +196,8 @@ export async function returnProductDescription({
   upc,
 }) {
   let model;
-  if (collection === "Inventory") {
-    model = Inventory;
-  } else if (collection === "Overstock") {
-    model = Overstock;
+  if (collection === "Merged") {
+    model = Merged;
   } else {
     return "Invalid collection";
   }
@@ -257,10 +227,8 @@ export async function writeUPCToMongoDB({
   upc,
 }) {
   let model;
-  if (collection === "Inventory") {
-    model = Inventory;
-  } else if (collection === "Overstock") {
-    model = Overstock;
+  if (collection === "Merged") {
+    model = Merged;
   } else {
     return "Invalid collection";
   }
@@ -298,10 +266,8 @@ export async function incrementSupplyQuantity({
   date = new Date(),
 }) {
   let model;
-  if (collection === "Inventory") {
-    model = Inventory;
-  } else if (collection === "Overstock") {
-    model = Overstock;
+  if (collection === "Merged") {
+    model = Merged;
   } else {
     return "Invalid collection";
   }

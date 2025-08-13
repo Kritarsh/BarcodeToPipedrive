@@ -26,6 +26,7 @@ import MachineSpecific from "./models/MachineSpecific.js";
 import MonthEndInventory from "./models/MonthEndInventory.js";
 import MonthEndOverstock from "./models/MonthEndOverstock.js";
 import MagentoInventory from "./models/MagentoInventory.js";
+import Merged from "./models/Merged.js";
 import path from "path";
 
 dotenv.config();
@@ -163,6 +164,29 @@ async function generateMagentoInventoryID() {
     // Fallback to timestamp-based ID if there's an error
     return Date.now();
   }
+}
+
+// Helper function to generate CSV content for Merged collection
+async function generateMergedCSV() {
+  const mergedData = await Merged.find().sort({ Date: -1 });
+  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+  let csvContent = headers.join(",") + "\n";
+  
+  mergedData.forEach(item => {
+    const row = [
+      `"${item.RefNum || ""}"`,
+      `"${item.UPC || ""}"`,
+      `"${item.MFR || ""}"`,
+      `"${item.Style || ""}"`,
+      `"${item.Size || ""}"`,
+      item.Quantity || 0,
+      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+  
+  return csvContent;
 }
 
 // --- Routes ---
@@ -443,8 +467,9 @@ app.post("/api/barcode", async (req, res) => {
       const size = result.row.Size || "";
       const upc = barcode;
 
-      // Supplies: increment quantity in the correct spreadsheet ONLY if no flaw
-      if (!qcFlaw || qcFlaw === "none") {
+      // Supplies: increment quantity in the correct spreadsheet ONLY if no flaw AND it's month-end workflow
+      const isMonthEndWorkflow = sessionId.includes('monthEnd');
+      if ((!qcFlaw || qcFlaw === "none") && isMonthEndWorkflow) {
         incrementSupplyQuantity({
           collection: result.collection,
           name,
@@ -453,6 +478,8 @@ app.post("/api/barcode", async (req, res) => {
           quantity: quantity,
           date: new Date(),
         });
+      } else if (!isMonthEndWorkflow) {
+        console.log(`Regular workflow: NOT incrementing quantity for item: ${name}`);
       } else {
         console.log(`Skipping quantity increment for flawed item: ${name} (Flaw: ${qcFlawLabel(qcFlaw)})`);
       }
@@ -481,25 +508,24 @@ app.post("/api/barcode", async (req, res) => {
         serialNumber: serialNumber || "",
         price: calculatedPrice,
         quantity: quantity, // Add quantity to session entry
-        collection: result.collection, // Add this for undo functionality
+        collection: "merged", // Always use merged collection
         upc: barcode, // Add this for undo functionality
       });
 
       await setSession(sessionId, currentSession);
 
-      // Also save to Month End collection when UPC is scanned - just update info, don't increment quantity
-      const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-      await monthEndCollection.findOneAndUpdate(
+      // Save to merged collection when UPC is scanned - just update info, don't increment quantity (regular workflow)
+      await Merged.findOneAndUpdate(
         {
           UPC: upc,
           Style: result.row.Description || result.row.Name || result.row.Style || "",
           Size: result.row.Size || "",
-          MFR: result.row.MFR || result.collection
+          MFR: result.row.MFR || "Unknown"
         },
         {
           $setOnInsert: { 
             RefNum: "",
-            Quantity: 0 // Set to 0 for new items from regular workflow
+            Quantity: 0 // Set to 0 for new items from regular workflow (don't increment)
           },
           $set: { 
             Date: new Date(),
@@ -622,18 +648,17 @@ app.post("/api/barcode/manual", async (req, res) => {
 
     await setSession(sessionId, currentSession);
 
-    // Also save to corresponding Month End collection with calculated price - just update info, don't increment quantity
-    const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-    await monthEndCollection.findOneAndUpdate(
+    // Also save to merged collection with calculated price - just update info, don't increment quantity (regular workflow)
+    await Merged.findOneAndUpdate(
       {
         RefNum: manualRef || "",
         Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
         Size: matchResult.row.Size || "",
-        MFR: matchResult.row.MFR || matchResult.collection
+        MFR: matchResult.row.MFR || "Unknown"
       },
       {
         $setOnInsert: { 
-          Quantity: 0 // Set to 0 for new items from regular workflow
+          Quantity: 0 // Set to 0 for new items from regular workflow (don't increment)
         },
         $set: { 
           ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
@@ -739,11 +764,9 @@ app.post("/api/barcode/undo", async (req, res) => {
     // Get the last item before removing it
     const undoneItem = currentSession.skuEntries[currentSession.skuEntries.length - 1];
     
-    // Try to decrement quantity in the database if the item has collection/UPC info
-    if (undoneItem.collection && (undoneItem.upc || undoneItem.refNum)) {
+    // Try to decrement quantity in merged collection if the item has UPC or RefNum info
+    if (undoneItem.upc || undoneItem.refNum) {
       try {
-        const monthEndCollection = undoneItem.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-        
         // Build the find query - prefer UPC if available, otherwise use RefNum
         let findQuery;
         if (undoneItem.upc && undoneItem.upc.trim() !== '') {
@@ -758,10 +781,10 @@ app.post("/api/barcode/undo", async (req, res) => {
         if (findQuery) {
           // Find the document and decrement quantity by the actual scanned quantity
           const quantityToRemove = undoneItem.quantity || 1;
-          const doc = await monthEndCollection.findOne(findQuery);
+          const doc = await Merged.findOne(findQuery);
           if (doc && doc.Quantity > 0) {
             const newQuantity = Math.max(0, doc.Quantity - quantityToRemove);
-            await monthEndCollection.findOneAndUpdate(
+            await Merged.findOneAndUpdate(
               findQuery,
               {
                 $set: {
@@ -770,11 +793,11 @@ app.post("/api/barcode/undo", async (req, res) => {
                 }
               }
             );
-            console.log(`[Undo] Decremented quantity by ${quantityToRemove} to ${newQuantity} for ${Object.keys(findQuery)[0]}: ${Object.values(findQuery)[0]}`);
+            console.log(`[Undo] Decremented quantity by ${quantityToRemove} to ${newQuantity} in merged collection for ${Object.keys(findQuery)[0]}: ${Object.values(findQuery)[0]}`);
           }
         }
       } catch (dbError) {
-        console.error("Error decrementing database quantity:", dbError);
+        console.error("Error decrementing merged collection quantity:", dbError);
         // Continue with session cleanup even if database update fails
       }
     }
@@ -805,7 +828,7 @@ app.post("/api/barcode/undo", async (req, res) => {
   }
 });
 
-// Add new product to main inventory/overstock and Month End collections
+// Add new product to merged collection only (remove manufacturer-based separation)
 app.post("/api/product/new", async (req, res) => {
   const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr, quantity = 1 } = req.body;
   if (!description || !sessionId) {
@@ -813,69 +836,22 @@ app.post("/api/product/new", async (req, res) => {
   }
 
   try {
-    // Determine which collection to use based on manufacturer
-    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
-    
     // Calculate price using existing pricing logic or provided price
     const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
     
-    // Save to main collection
-    let newProduct;
-    if (isInventoryItem) {
-      newProduct = new Inventory({
-        RefNum: manualRef || "",
-        ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
-        Style: description,
-        Size: size || "",
-        MFR: mfr,
-        Quantity: 0, // Start with 0 as requested
-        Date: new Date(),
-        Price: calculatedPrice,
-      });
-    } else {
-      newProduct = new Overstock({
-        RefNum: manualRef || "",
-        ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
-        Style: description,
-        Size: size || "",
-        MFR: mfr || "Unknown",
-        Quantity: 0, // Start with 0 as requested
-        Date: new Date(),
-        Price: calculatedPrice,
-      });
-    }
+    // Save to merged collection only
+    const newProduct = new Merged({
+      RefNum: manualRef || "",
+      ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
+      Style: description,
+      Size: size || "",
+      MFR: mfr || "Unknown",
+      Quantity: 0, // Start with 0 for regular workflow (don't increment)
+      Date: new Date(),
+      Price: calculatedPrice,
+    });
     
     await newProduct.save();
-
-    // Also save to corresponding Month End collection with calculated price - just update info, don't increment quantity
-    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
-    const monthEndProduct = await monthEndCollection.findOneAndUpdate(
-      {
-        // Use RefNum as primary key if provided, otherwise use UPC (if available)
-        ...(manualRef ? 
-          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
-          barcode ? 
-            { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
-            { Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } // No primary key fallback
-        )
-      },
-      {
-        $setOnInsert: { 
-          ...(manualRef ? {} : { RefNum: "" }), // Only set RefNum to "" on insert when no manualRef
-          Quantity: 0 // Set to 0 for new items from regular workflow
-        },
-        $set: { 
-          ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
-          Date: new Date(),
-          Price: calculatedPrice
-        }
-      },
-      {
-        upsert: true,
-        new: true,
-        setDefaultsOnInsert: true
-      }
-    );
 
     // Add to session
     const currentSession = await getSession(sessionId);
@@ -895,7 +871,7 @@ app.post("/api/product/new", async (req, res) => {
       quantity: quantity, // Add quantity field
       isManual: true,
       upc: barcode || "", // Use empty string if no barcode
-      collection: isInventoryItem ? "Inventory" : "Overstock",
+      collection: "merged", // Always use merged collection
     });
     await setSession(sessionId, currentSession);
 
@@ -936,6 +912,9 @@ app.put("/api/products/:collection/:id", async (req, res) => {
         break;
       case 'MagentoInventory':
         Model = MagentoInventory;
+        break;
+      case 'merged':
+        Model = Merged;
         break;
       default:
         return res.status(400).json({ error: "Invalid collection specified" });
@@ -1342,11 +1321,11 @@ app.post("/api/month-end/barcode", async (req, res) => {
           isMachine: true,
           upc: barcode, // This is the serial number when machineType is provided
           name: machineName,
-          collection: "Overstock", // Add collection for undo (machines go to Overstock)
+          collection: "merged", // Always use merged collection
         });
 
-        // Save machine immediately to Month End Overstock - increment if exists
-        await MonthEndOverstock.findOneAndUpdate(
+        // Save machine to merged collection - increment if exists
+        await Merged.findOneAndUpdate(
           {
             UPC: barcode, // Use serial number as UPC
             Style: machineName, // Use machine name as Style
@@ -1426,20 +1405,19 @@ app.post("/api/month-end/barcode", async (req, res) => {
         serialNumber: serialNumber || "",
         price: calculatedPrice,
         quantity: quantity, // Add quantity field
-        collection: result.collection,
+        collection: "merged", // Always use merged collection
         upc: barcode,
         name: name,
         isMachine: false,
       });
 
-      // Save immediately to Month End collection based on original collection - increment if exists (UPC as primary key)
-      const monthEndCollection = result.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-      await monthEndCollection.findOneAndUpdate(
+      // Save to merged collection and increment quantity (month-end workflow)
+      await Merged.findOneAndUpdate(
         {
           UPC: upc,
           Style: result.row.Description || result.row.Name || result.row.Style || "",
           Size: result.row.Size || "",
-          MFR: result.row.MFR || result.collection
+          MFR: result.row.MFR || "Unknown"
         },
         {
           $inc: { Quantity: quantity },
@@ -1545,24 +1523,24 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
       serialNumber: serialNumber || "",
       price: calculatedPrice,
       quantity: quantity, // Add quantity to manual reference entry
-      collection: matchResult.collection, // Add collection for undo
+      collection: "merged", // Always use merged collection
       upc: barcode || "", // Add UPC for undo (may be empty)
       refNum: manualRef, // Add manual reference for undo
     });
 
-    // Save immediately to Month End collection based on original collection - increment if exists (RefNum as primary key)
-    const monthEndCollection = matchResult.collection === "Inventory" ? MonthEndInventory : MonthEndOverstock;
-    await monthEndCollection.findOneAndUpdate(
+    // Save to merged collection and increment quantity (month-end workflow)
+    await Merged.findOneAndUpdate(
       {
         RefNum: manualRef || "",
         Style: matchResult.row.Description || matchResult.row.Name || matchResult.row.Style || "",
         Size: matchResult.row.Size || "",
-        MFR: matchResult.row.MFR || matchResult.collection
+        MFR: matchResult.row.MFR || "Unknown"
       },
       {
         $inc: { Quantity: quantity },
         $set: { 
           ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
+          ...(manualRef && { RefNum: manualRef }), // Set RefNum if manualRef exists
           Date: new Date(),
           Price: calculatedPrice
         }
@@ -1573,40 +1551,6 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
         setDefaultsOnInsert: true
       }
     );
-
-    // Two-way integration: Also update the regular inventory collection with UPC if barcode exists
-    if (barcode && matchResult.row) {
-      try {
-        const regularCollection = matchResult.collection === "Inventory" ? Inventory : Overstock;
-        await regularCollection.findOneAndUpdate(
-          {
-            RefNum: matchResult.row.RefNum || manualRef
-          },
-          {
-            $set: { 
-              UPC: barcode,
-              Date: new Date()
-            }
-          },
-          {
-            new: true
-          }
-        );
-        
-        // Also call writeUPCToMongoDB for additional Pipedrive integration
-        await writeUPCToMongoDB({
-          collection: matchResult.collection,
-          matchedColumn: matchResult.matchedColumn,
-          rowValue: matchResult.row[matchResult.matchedColumn],
-          upc: barcode,
-        });
-        
-        console.log(`✅ Two-way integration: Updated UPC ${barcode} in regular ${matchResult.collection} collection for RefNum: ${matchResult.row.RefNum || manualRef}`);
-      } catch (error) {
-        console.error("Error updating regular inventory collection with UPC:", error);
-        // Don't fail the request if this update fails - log and continue
-      }
-    }
 
     await setSession(sessionId, currentSession);
 
@@ -1625,7 +1569,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
 
     return res.json({
       match: true,
-      message: "SKU found and added to month end inventory!",
+      message: "SKU found and added to merged collection!",
       spreadsheetMatch: !!matchResult.collection,
       price: calculatedPrice,
       descriptionResult: descriptionResult || {},
@@ -1651,7 +1595,7 @@ app.post("/api/month-end/barcode/manual", async (req, res) => {
   });
 });
 
-// Month End new product endpoint
+// Month End new product endpoint - increment quantity in merged collection
 app.post("/api/month-end/product/new", async (req, res) => {
   console.log("🔥 MONTH END NEW PRODUCT HANDLER HIT!", req.body);
   const { barcode, description, size, price, qcFlaw, manualRef, sessionId, mfr, quantity = 1, serialNumber } = req.body;
@@ -1660,38 +1604,18 @@ app.post("/api/month-end/product/new", async (req, res) => {
   }
 
   try {
-    // Determine which collection to use based on manufacturer
-    const isInventoryItem = mfr && (mfr.toUpperCase() === "RESMED" || mfr.toUpperCase() === "RESPIRONICS");
-    
     // Calculate price using existing pricing logic or provided price
     const calculatedPrice = price ? parseFloat(price) : await getPriceForName(description, qcFlaw);
     
-    // First, save to regular inventory collection (Inventory or Overstock)
-    const regularCollection = isInventoryItem ? Inventory : Overstock;
-    const regularProduct = new regularCollection({
-      RefNum: manualRef || "",
-      ...(barcode && { UPC: barcode }), // Only set UPC if barcode exists
-      Style: description,
-      Size: size || "",
-      MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown"),
-      Quantity: 0, // Start with 0 in regular inventory
-      Date: new Date(),
-      Price: calculatedPrice,
-    });
-    
-    await regularProduct.save();
-    console.log(`[Month End] New product saved to regular ${isInventoryItem ? "Inventory" : "Overstock"}:`, regularProduct);
-    
-    // Also save to Month End collection and increment quantity
-    const monthEndCollection = isInventoryItem ? MonthEndInventory : MonthEndOverstock;
-    const monthEndProduct = await monthEndCollection.findOneAndUpdate(
+    // Save to merged collection and increment quantity (month-end workflow)
+    const mergedProduct = await Merged.findOneAndUpdate(
       {
         // Use RefNum as primary key if provided, otherwise use UPC (if available), otherwise use Style+Size+MFR
         ...(manualRef ? 
-          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
+          { RefNum: manualRef, Style: description, Size: size || "", MFR: mfr || "Unknown" } :
           barcode ? 
-            { UPC: barcode, Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } :
-            { Style: description, Size: size || "", MFR: mfr || (isInventoryItem ? "Unknown" : "Unknown") } // Fallback to style+size+mfr
+            { UPC: barcode, Style: description, Size: size || "", MFR: mfr || "Unknown" } :
+            { Style: description, Size: size || "", MFR: mfr || "Unknown" } // Fallback to style+size+mfr
         )
       },
       {
@@ -1713,6 +1637,8 @@ app.post("/api/month-end/product/new", async (req, res) => {
         setDefaultsOnInsert: true
       }
     );
+
+    console.log(`[Month End] New product saved to merged collection:`, mergedProduct);
 
     // Add to session
     const currentSession = await getSession(sessionId);
@@ -1739,17 +1665,16 @@ app.post("/api/month-end/product/new", async (req, res) => {
       isManual: true,
       upc: barcode || "",
       refNum: manualRef || "",
-      collection: isInventoryItem ? "Inventory" : "Overstock",
+      collection: "merged", // Always use merged collection
     });
     
     await setSession(sessionId, currentSession);
 
-    console.log(`[Month End] New product added to ${isInventoryItem ? "MonthEndInventory" : "MonthEndOverstock"}:`, monthEndProduct);
+    console.log(`[Month End] New product added to merged collection:`, mergedProduct);
 
     return res.json({ 
-      message: "Product added to both regular inventory and month end inventory successfully!", 
-      regularProduct: regularProduct,
-      monthEndProduct: monthEndProduct,
+      message: "Product added to merged collection successfully!", 
+      mergedProduct: mergedProduct,
       price: calculatedPrice
     });
   } catch (err) {
@@ -1758,79 +1683,99 @@ app.post("/api/month-end/product/new", async (req, res) => {
   }
 });
 
-// Helper function to generate CSV content for Month End Inventory
-async function generateMonthEndInventoryCSV() {
-  const monthEndInventoryData = await MonthEndInventory.find().sort({ Date: -1 });
-  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
-  let csvContent = headers.join(",") + "\n";
-  
-  monthEndInventoryData.forEach(item => {
-    const row = [
-      `"${item.RefNum || ""}"`,
-      `"${item.UPC || ""}"`,
-      `"${item.MFR || ""}"`,
-      `"${item.Style || ""}"`,
-      `"${item.Size || ""}"`,
-      item.Quantity || 0,
-      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
-      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
-    ];
-    csvContent += row.join(",") + "\n";
-  });
-  
-  return csvContent;
-}
+// Merged collection API endpoint
+app.get("/api/merged", async (req, res) => {
+  try {
+    console.log("Attempting to fetch Merged collection data...");
+    console.log("Merged model collection name:", Merged.collection.name);
+    
+    const mergedData = await Merged.find().sort({ Date: -1 });
+    console.log("Found Merged collection documents:", mergedData.length);
+    console.log("Sample document:", mergedData[0]);
+    
+    // Convert Decimal128 Price values to numbers for frontend
+    const processedData = mergedData.map(item => ({
+      ...item.toObject(),
+      Price: item.Price ? parseFloat(item.Price.toString()) : 0
+    }));
+    
+    res.json({ data: processedData });
+  } catch (err) {
+    console.error("Error fetching merged collection:", err);
+    res.status(500).json({ error: "Failed to fetch merged collection data" });
+  }
+});
 
-// Helper function to generate CSV content for Month End Overstock
-async function generateMonthEndOverstockCSV() {
-  const monthEndOverstockData = await MonthEndOverstock.find().sort({ Date: -1 });
-  const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
-  let csvContent = headers.join(",") + "\n";
-  
-  monthEndOverstockData.forEach(item => {
-    const row = [
-      `"${item.RefNum || ""}"`,
-      `"${item.UPC || ""}"`,
-      `"${item.MFR || ""}"`,
-      `"${item.Style || ""}"`,
-      `"${item.Size || ""}"`,
-      item.Quantity || 0,
-      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
-      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
-    ];
-    csvContent += row.join(",") + "\n";
-  });
-  
-  return csvContent;
-}
+// Merged collection CSV export endpoint
+app.get("/api/merged/export-csv", async (req, res) => {
+  try {
+    console.log("CSV Export request received for Merged collection");
+    const mergedData = await Merged.find().sort({ Date: -1 });
+    console.log("Found documents for export:", mergedData.length);
+    
+    // Define CSV headers
+    const headers = ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"];
+    
+    // Convert data to CSV format
+    let csvContent = headers.join(",") + "\n";
+    
+    if (mergedData.length === 0) {
+      console.log("No data found, returning empty CSV with headers");
+    } else {
+      mergedData.forEach(item => {
+        const row = [
+          `"${item.RefNum || ""}"`,
+          `"${item.UPC || ""}"`,
+          `"${item.MFR || ""}"`,
+          `"${item.Style || ""}"`,
+          `"${item.Size || ""}"`,
+          item.Quantity || 0,
+          item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
+          `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`
+        ];
+        csvContent += row.join(",") + "\n";
+      });
+    }
+    
+    // Set headers for file download
+    const timestamp = new Date().toISOString().slice(0, 10); // YYYY-MM-DD format
+    const filename = `merged-collection-${timestamp}.csv`;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+    console.log("CSV export completed successfully");
+    
+  } catch (err) {
+    console.error("Error exporting Merged collection CSV:", err);
+    res.status(500).json({ error: "Failed to export Merged collection CSV" });
+  }
+});
 
-// Helper function to generate CSV content for Magento Inventory
-async function generateMagentoInventoryCSV() {
-  const magentoInventoryData = await MagentoInventory.find().sort({ Date: -1 });
-  const headers = ["ID", "Name", "RefNum", "UPC", "Manufacturer", "size", "Quantity", "Price", "Websites", "Date", "QcFlaw", "SerialNumber", "Source"];
-  let csvContent = headers.join(",") + "\n";
-  
-  magentoInventoryData.forEach(item => {
-    const row = [
-      item.ID || "",
-      `"${item.Name || ""}"`,
-      `"${item.RefNum || ""}"`,
-      `"${item.UPC || ""}"`,
-      `"${item.Manufacturer || ""}"`,
-      `"${item.size || ""}"`,
-      item.Quantity || 0,
-      item.Price ? (item.Price.$numberDecimal || item.Price) : 0,
-      `"${item.Websites || ""}"`,
-      `"${item.Date ? new Date(item.Date).toLocaleDateString() : ""}"`,
-      `"${item.QcFlaw || ""}"`,
-      `"${item.SerialNumber || ""}"`,
-      `"${item.Source || ""}"`
-    ];
-    csvContent += row.join(",") + "\n";
-  });
-  
-  return csvContent;
-}
+// Clear all quantities in merged collection endpoint
+app.post("/api/merged/clear-quantities", async (req, res) => {
+  try {
+    console.log("Clear all quantities request received for Merged collection");
+    
+    // Clear quantities in Merged collection
+    const result = await Merged.updateMany(
+      {},
+      { $set: { Quantity: 0, Date: new Date() } }
+    );
+    
+    console.log(`Cleared quantities for ${result.modifiedCount} merged collection items`);
+    
+    res.json({
+      success: true,
+      message: `Successfully cleared quantities for all merged collection items`,
+      itemsCleared: result.modifiedCount
+    });
+    
+  } catch (err) {
+    console.error("Error clearing Merged collection quantities:", err);
+    res.status(500).json({ error: "Failed to clear Merged collection quantities" });
+  }
+});
 
 // Month End finish/complete session endpoint
 app.post("/api/month-end/finish", async (req, res) => {
@@ -1839,10 +1784,9 @@ app.post("/api/month-end/finish", async (req, res) => {
     
     console.log(`[Month End] Finish session received:`, { sessionId });
 
-    // Generate CSV exports
+    // Generate merged collection CSV export
     const timestamp = new Date().toISOString().slice(0, 10);
-    const inventoryCSV = await generateMonthEndInventoryCSV();
-    const overstockCSV = await generateMonthEndOverstockCSV();
+    const mergedCSV = await generateMergedCSV();
 
     // Clear the session data
     const currentSession = await getSession(sessionId);
@@ -1860,13 +1804,9 @@ app.post("/api/month-end/finish", async (req, res) => {
       success: true,
       message: `Month End session ${sessionId} completed successfully!`,
       csvExports: {
-        inventory: {
-          filename: `month-end-inventory-${timestamp}.csv`,
-          content: inventoryCSV
-        },
-        overstock: {
-          filename: `month-end-overstock-${timestamp}.csv`,
-          content: overstockCSV
+        merged: {
+          filename: `merged-collection-${timestamp}.csv`,
+          content: mergedCSV
         }
       }
     });
@@ -1906,7 +1846,7 @@ app.post("/api/magento-inventory/session/restore", async (req, res) => {
         price: item.price || 0,
         quantity: item.quantity || 1,
         qcFlaw: item.qcFlaw || "none",
-        serialNumber: item.serialNumber || "",
+        serialNumber: item.sku || "",
         timestamp: new Date(item.timestamp) || new Date(),
         source: item.source || "restored"
       }));

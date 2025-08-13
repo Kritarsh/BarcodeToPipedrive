@@ -29,11 +29,16 @@ function PriceManagement() {
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/api/products/prices');
-      if (!response.data) {
+      const response = await api.get('/api/merged');
+      if (!response.data || !response.data.data) {
         throw new Error('No data received');
       }
-      setProducts(response.data);
+      // Add collection identifier to each product for consistency with legacy code
+      const productsWithCollection = response.data.data.map(item => ({
+        ...item,
+        collection: 'merged'
+      }));
+      setProducts(productsWithCollection);
     } catch (err) {
       setError('Failed to load products: ' + err.message);
     } finally {
@@ -153,10 +158,7 @@ function PriceManagement() {
             disabled={saving}
             autoFocus
           >
-            <option value="Inventory">Inventory</option>
-            <option value="Overstock">Overstock</option>
-            <option value="MonthEndInventory">MonthEndInventory</option>
-            <option value="MonthEndOverstock">MonthEndOverstock</option>
+            <option value="merged">Merged Collection</option>
           </select>
         );
       }
@@ -185,17 +187,11 @@ function PriceManagement() {
       >
         {field === 'collection' ? (
           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-            value === 'Inventory' 
+            value === 'merged' 
               ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200' 
-              : value === 'Overstock'
-              ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200'
-              : value === 'MonthEndInventory'
-              ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200'
-              : value === 'MonthEndOverstock'
-              ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200'
               : 'bg-gray-100 dark:bg-gray-900/30 text-gray-800 dark:text-gray-200'
           }`}>
-            {value}
+            {value === 'merged' ? 'Merged Collection' : value || 'Unknown'}
           </span>
         ) : field === 'price' ? (
           <span className="text-lg font-semibold">
@@ -232,7 +228,7 @@ function PriceManagement() {
       <div className="max-w-full mx-auto p-6">
         <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Price Management</h2>
         <p className="text-gray-600 dark:text-gray-400 mb-6">
-          Manage prices for inventory and overstock items. Double-click any field to edit.
+          Manage prices for the merged inventory collection. Double-click any field to edit.
         </p>
 
         {error && (
@@ -273,10 +269,7 @@ function PriceManagement() {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
               >
                 <option value="all">All Collections</option>
-                <option value="Inventory">Inventory</option>
-                <option value="Overstock">Overstock</option>
-                <option value="MonthEndInventory">Month End Inventory</option>
-                <option value="MonthEndOverstock">Month End Overstock</option>
+                <option value="merged">Merged Collection</option>
               </select>
             </div>
             <div className="flex items-end">

@@ -66,10 +66,10 @@ function MonthEndInventory() {
   const skuInputRef = useRef(null);
   const manualRefInputRef = useRef(null);
 
-  // MongoDB data states for Month End collections
+  // MongoDB data states for merged collection
   const [monthEndInventoryData, setMonthEndInventoryData] = useState([]);
   const [monthEndOverstockData, setMonthEndOverstockData] = useState([]);
-  const [selectedCollection, setSelectedCollection] = useState("monthEndInventory");
+  const [selectedCollection, setSelectedCollection] = useState("merged");
 
   useEffect(() => {
     if (skuInputRef.current) {
@@ -153,47 +153,35 @@ function MonthEndInventory() {
     localStorage.setItem('monthEnd_quantity', quantity.toString());
   }, [quantity]);
 
-  // Function to refresh month end data
+  // Function to refresh merged collection data
   const refreshMonthEndData = () => {
-    // Refresh Month End Inventory data
+    // Refresh Merged collection data
     axios
-      .get(`${apiUrl}/api/month-end-inventory`)
+      .get(`${apiUrl}/api/merged`)
       .then((res) => {
-        console.log("Refreshed Month End Inventory Data:", res.data.data);
+        console.log("Refreshed Merged Collection Data:", res.data.data);
         setMonthEndInventoryData(res.data.data);
+        setMonthEndOverstockData([]); // Clear overstock data since we're using merged
       })
-      .catch(() => setMonthEndInventoryData([]));
-
-    // Refresh Month End Overstock data
-    axios
-      .get(`${apiUrl}/api/month-end-overstock`)
-      .then((res) => {
-        console.log("Refreshed Month End Overstock Data:", res.data.data);
-        setMonthEndOverstockData(res.data.data);
-      })
-      .catch(() => setMonthEndOverstockData([]));
+      .catch(() => {
+        setMonthEndInventoryData([]);
+        setMonthEndOverstockData([]);
+      });
   };
 
-  // Fetch Month End Inventory data
+  // Fetch Merged collection data
   useEffect(() => {
     axios
-      .get(`${apiUrl}/api/month-end-inventory`)
+      .get(`${apiUrl}/api/merged`)
       .then((res) => {
-        console.log("Month End Inventory Data:", res.data.data);
+        console.log("Merged Collection Data:", res.data.data);
         setMonthEndInventoryData(res.data.data);
+        setMonthEndOverstockData([]); // Clear overstock data since we're using merged
       })
-      .catch(() => setMonthEndInventoryData([]));
-  }, []);
-
-  // Fetch Month End Overstock data
-  useEffect(() => {
-    axios
-      .get(`${apiUrl}/api/month-end-overstock`)
-      .then((res) => {
-        console.log("Month End Overstock Data:", res.data.data);
-        setMonthEndOverstockData(res.data.data);
-      })
-      .catch(() => setMonthEndOverstockData([]));
+      .catch(() => {
+        setMonthEndInventoryData([]);
+        setMonthEndOverstockData([]);
+      });
   }, []);
 
 
@@ -432,13 +420,10 @@ function MonthEndInventory() {
       
       // Handle automatic CSV downloads if provided
       if (res.data.csvExports) {
-        if (res.data.csvExports.inventory) {
-          downloadCSV(res.data.csvExports.inventory.content, res.data.csvExports.inventory.filename);
+        if (res.data.csvExports.merged) {
+          downloadCSV(res.data.csvExports.merged.content, res.data.csvExports.merged.filename);
         }
-        if (res.data.csvExports.overstock) {
-          downloadCSV(res.data.csvExports.overstock.content, res.data.csvExports.overstock.filename);
-        }
-        setMessage(res.data.message + " CSV files have been automatically downloaded.");
+        setMessage(res.data.message + " CSV file has been automatically downloaded.");
       } else {
         setMessage(res.data.message || "Month End inventory completed successfully.");
       }
@@ -470,11 +455,11 @@ function MonthEndInventory() {
     }
   };
 
-  // Function to clear all quantities in Month End collections
+  // Function to clear all quantities in merged collection
   const handleClearAllQuantities = async () => {
     // Show confirmation dialog
     const confirmClear = window.confirm(
-      "Are you sure you want to clear all quantities in Month End Inventory and Overstock collections? This action cannot be undone."
+      "Are you sure you want to clear all quantities in the merged collection? This action cannot be undone."
     );
     
     if (!confirmClear) {
@@ -484,18 +469,17 @@ function MonthEndInventory() {
     try {
       setMessage("Clearing all quantities...");
       
-      const res = await axios.post(`${apiUrl}/api/month-end/clear-quantities`);
+      const res = await axios.post(`${apiUrl}/api/merged/clear-quantities`);
       
       if (res.data.success) {
         setMessage(
-          `${res.data.message}. Cleared ${res.data.totalItemsCleared} items total ` +
-          `(${res.data.inventoryItemsCleared} inventory, ${res.data.overstockItemsCleared} overstock).`
+          `${res.data.message}. Cleared ${res.data.itemsCleared} items.`
         );
         
         // Refresh the data to show the cleared quantities
         refreshMonthEndData();
         
-        console.log("Month End quantities cleared successfully:", res.data);
+        console.log("Merged collection quantities cleared successfully:", res.data);
       } else {
         setMessage("Failed to clear quantities. Please try again.");
       }
@@ -570,15 +554,7 @@ function MonthEndInventory() {
   // Function to handle CSV export
   const handleExportCSV = async () => {
     try {
-      let endpoint;
-      if (selectedCollection === "monthEndInventory") {
-        endpoint = "/api/month-end-inventory/export-csv";
-      } else if (selectedCollection === "monthEndOverstock") {
-        endpoint = "/api/month-end-overstock/export-csv";
-      } else {
-        setMessage("Invalid collection selected");
-        return;
-      }
+      const endpoint = "/api/merged/export-csv";
       
       const response = await fetch(`${apiUrl}${endpoint}`);
       
@@ -612,26 +588,22 @@ function MonthEndInventory() {
       window.URL.revokeObjectURL(url);
       
       const collectionNames = {
-        monthEndInventory: "Month End Inventory",
-        monthEndOverstock: "Month End Overstock"
+        merged: "Merged Collection"
       };
-      setMessage(`${collectionNames[selectedCollection]} CSV exported successfully!`);
+      setMessage(`${collectionNames[selectedCollection] || "Merged Collection"} CSV exported successfully!`);
     } catch (error) {
       console.error("Error exporting CSV:", error);
       setMessage("Failed to export CSV. Please try again.");
     }
   };
 
-  // Determine which data to show
-  let tableData = [];
-  if (selectedCollection === "monthEndInventory") tableData = monthEndInventoryData;
-  else if (selectedCollection === "monthEndOverstock") tableData = monthEndOverstockData;
+  // Determine which data to show - use merged collection data
+  let tableData = monthEndInventoryData;
 
   const fieldOrders = {
-    monthEndInventory: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"],
-    monthEndOverstock: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"]
+    merged: ["RefNum", "UPC", "MFR", "Style", "Size", "Quantity", "Price", "Date"]
   };
-  const currentFieldOrder = fieldOrders[selectedCollection] || [];
+  const currentFieldOrder = fieldOrders[selectedCollection] || fieldOrders.merged;
 
   // Function to clear month end workflow state from localStorage
   const clearMonthEndWorkflowState = () => {
@@ -875,23 +847,18 @@ function MonthEndInventory() {
       <div className="flex-1 p-6 overflow-auto">
         <div className="card bg-base-100 shadow-xl">
           <div className="card-body">
-            <h2 className="card-title text-2xl mb-4">Month End Data</h2>
+            <h2 className="card-title text-2xl mb-4">Merged Collection Data</h2>
             <div className="mb-4">
-              <select
-                className="select select-bordered w-full max-w-xs"
-                value={selectedCollection}
-                onChange={(e) => setSelectedCollection(e.target.value)}
-              >
-                <option value="monthEndInventory">Month End Inventory</option>
-                <option value="monthEndOverstock">Month End Overstock</option>
-              </select>
-              <button
-                onClick={handleExportCSV}
-                className="btn btn-outline btn-primary ml-4"
-                disabled={tableData.length === 0}
-              >
-                📊 Export CSV
-              </button>
+              <div className="flex items-center gap-4">
+                <span className="text-lg font-semibold">Merged Collection</span>
+                <button
+                  onClick={handleExportCSV}
+                  className="btn btn-outline btn-primary"
+                  disabled={tableData.length === 0}
+                >
+                  📊 Export CSV
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               {tableData.length > 0 ? (
